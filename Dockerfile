@@ -12,9 +12,11 @@ COPY src/ src/
 RUN npm run build
 
 # Stage 2: Production
-FROM node:24-alpine
+FROM node:24-slim
 
-# TODO: Add extra dependencies here if needed (e.g., LibreOffice, fonts)
+# TODO: Add extra dependencies here if needed (e.g., LibreOffice, fonts).
+# Base trocada de alpine para slim (glibc) porque o sharp depende de libvips
+# ligada a glibc; os binarios pre-compilados nao funcionam sob musl (alpine).
 
 WORKDIR /app
 
