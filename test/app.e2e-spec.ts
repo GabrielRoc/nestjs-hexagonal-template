@@ -1,25 +1,25 @@
-import { INestApplication } from '@nestjs/common';
-
 describe('App (e2e)', () => {
-  let app: INestApplication | undefined;
+  // TODO: Configure test module with a test database, then uncomment:
+  //
+  // import { INestApplication } from '@nestjs/common';
+  // import { Test, TestingModule } from '@nestjs/testing';
+  // import { AppModule } from '../src/app.module';
+  //
+  // let app: INestApplication;
+  //
+  // beforeAll(async () => {
+  //   const moduleFixture: TestingModule = await Test.createTestingModule({
+  //     imports: [AppModule],
+  //   }).compile();
+  //   app = moduleFixture.createNestApplication();
+  //   await app.init();
+  // });
+  //
+  // afterAll(async () => {
+  //   await app.close();
+  // });
 
-  beforeAll(async () => {
-    // TODO: Configure test module with test database
-    // const moduleFixture: TestingModule = await Test.createTestingModule({
-    //   imports: [AppModule],
-    // }).compile();
-    // app = moduleFixture.createNestApplication();
-    // await app.init();
-  });
-
-  afterAll(async () => {
-    if (app) {
-      await app.close();
-    }
-  });
-
-  it('should be defined', () => {
-    // TODO: Implement e2e tests
+  it('placeholder — replace with real e2e tests', () => {
     expect(true).toBe(true);
   });
 
