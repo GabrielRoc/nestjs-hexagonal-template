@@ -11,12 +11,24 @@ export class ErrorBodySwagger {
   @ApiProperty({ example: 'Erro de validação' })
   message!: string;
 
+  /**
+   * ZodValidationPipe e o ramo de array do filtro emitem sempre uma lista de
+   * `{ field, message }`; declarar como objeto quebraria os clientes gerados.
+   */
   @ApiPropertyOptional({
     description:
       'Detalhes adicionais. Para erros de validação, um item por campo.',
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        field: { type: 'string' },
+        message: { type: 'string' },
+      },
+    },
     example: [{ field: 'name', message: 'Obrigatório' }],
   })
-  details?: unknown;
+  details?: { field: string; message: string }[];
 }
 
 export class ErrorResponseSwagger {
