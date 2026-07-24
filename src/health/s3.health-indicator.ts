@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   HealthCheckError,
   HealthIndicator,
@@ -7,8 +7,12 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 
+/** Mensagem generica devolvida ao cliente; o motivo real vai para o log. */
+const UNAVAILABLE_MESSAGE = 'Storage indisponível';
+
 @Injectable()
 export class S3HealthIndicator extends HealthIndicator {
+  private readonly logger = new Logger(S3HealthIndicator.name);
   private readonly client: S3Client;
   private readonly bucket: string | undefined;
 
@@ -27,12 +31,15 @@ export class S3HealthIndicator extends HealthIndicator {
   }
 
   async isHealthy(key: string): Promise<HealthIndicatorResult> {
+    // GET /api/health e publico: a resposta nunca pode descrever a infra
+    // (endpoint interno, IP, credencial). O detalhe fica so no log do servidor.
     if (!this.bucket) {
+      this.logger.error(
+        'S3 health check failed: AWS_S3_BUCKET não configurado',
+      );
       throw new HealthCheckError(
         'S3 health check failed',
-        this.getStatus(key, false, {
-          message: 'AWS_S3_BUCKET não configurado',
-        }),
+        this.getStatus(key, false, { message: UNAVAILABLE_MESSAGE }),
       );
     }
 
@@ -40,11 +47,15 @@ export class S3HealthIndicator extends HealthIndicator {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
       return this.getStatus(key, true);
     } catch (error) {
+      this.logger.error(
+        `S3 health check failed for bucket "${this.bucket}": ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
       throw new HealthCheckError(
         'S3 health check failed',
-        this.getStatus(key, false, {
-          message: error instanceof Error ? error.message : String(error),
-        }),
+        this.getStatus(key, false, { message: UNAVAILABLE_MESSAGE }),
       );
     }
   }
