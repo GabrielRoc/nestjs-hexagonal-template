@@ -38,10 +38,19 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         exceptionResponse !== null
       ) {
         const resp = exceptionResponse as Record<string, unknown>;
-        message = (resp.message as string) || exception.message;
+        // Preserva o code customizado (ex.: VALIDATION_ERROR do ZodValidationPipe)
+        if (typeof resp.code === 'string') {
+          code = resp.code;
+        }
+        // Preserva os erros por campo produzidos pelo Zod
+        if (Array.isArray(resp.details)) {
+          details = resp.details;
+        }
         if (Array.isArray(resp.message)) {
           message = 'Erro de validação';
           details = resp.message;
+        } else {
+          message = (resp.message as string) || exception.message;
         }
       } else {
         message = exception.message;
