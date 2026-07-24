@@ -77,6 +77,23 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       );
     }
 
+    // Erros 5xx nunca podem vazar a mensagem original para o cliente: ela pode
+    // conter credenciais ou detalhes de infraestrutura. Registra no servidor e
+    // devolve a mensagem generica, como no ramo de excecao desconhecida.
+    // Mensagens 4xx continuam passando intactas, pois sao para quem chamou.
+    const isServerError = status >= 500;
+    if (
+      isServerError &&
+      (exception instanceof HttpException ||
+        exception instanceof DomainException)
+    ) {
+      this.logger.error(
+        `${exception.name} ${status}: ${exception.message}`,
+        exception.stack,
+      );
+      message = 'Erro interno do servidor';
+    }
+
     response.status(status).json({
       error: {
         code,

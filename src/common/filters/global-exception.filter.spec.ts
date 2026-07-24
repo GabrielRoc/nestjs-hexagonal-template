@@ -1,4 +1,9 @@
-import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
 import { GlobalExceptionFilter } from './global-exception.filter';
 import { DomainException } from '../exceptions/domain.exception';
@@ -105,6 +110,22 @@ describe('GlobalExceptionFilter', () => {
     expect(json).toHaveBeenCalledWith({
       error: { code: 'HTTP_400', message: 'Http Exception' },
     });
+  });
+
+  it('nao vaza a mensagem de uma HttpException 5xx', () => {
+    const logger = jest
+      .spyOn(filter['logger'], 'error')
+      .mockImplementation(() => undefined);
+    filter.catch(
+      new InternalServerErrorException('db-prod-1 refused: password=hunter2'),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+    expect(json).toHaveBeenCalledWith({
+      error: { code: 'HTTP_500', message: 'Erro interno do servidor' },
+    });
+    expect(logger).toHaveBeenCalled();
   });
 
   it('mantem o code da DomainException', () => {
