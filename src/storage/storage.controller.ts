@@ -1,12 +1,10 @@
 import {
   Controller,
-  Get,
   HttpCode,
   HttpStatus,
   Inject,
-  Param,
+  Logger,
   Post,
-  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -19,10 +17,8 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { Response } from 'express';
 import { randomUUID } from 'node:crypto';
-import { extname } from 'node:path';
-import { Public, Roles } from '../common/decorators';
+import { Roles, TenantId } from '../common/decorators';
 import { ErrorCode } from '../common/enums/error-codes.enum';
 import { Role } from '../common/enums/role.enum';
 import { DomainException } from '../common/exceptions/domain.exception';
@@ -36,22 +32,27 @@ async function detectFileType(buffer: Buffer) {
   return fileTypeFromBuffer(buffer);
 }
 
+/**
+ * Apenas formatos que o ImageProcessingService reencoda para WebP sao aceitos:
+ * o ciclo decode/encode descarta payloads poliglotas embutidos na imagem.
+ * GIF fica de fora porque o sharp nao o reprocessa aqui, entao seria o unico
+ * formato armazenado byte a byte. A excecao deliberada e application/pdf, que
+ * nao e imagem e e armazenado sem processamento.
+ */
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
   'image/png',
-  'image/gif',
   'image/webp',
   'application/pdf',
 ];
 
-const ALLOWED_PUBLIC_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const PUBLIC_URL_EXPIRY_SECONDS = 3600;
 
 @ApiTags('Storage')
 @Controller()
 export class StorageController {
+  private readonly logger = new Logger(StorageController.name);
+
   constructor(
     @Inject(STORAGE_SERVICE)
     private readonly storageService: StorageServicePort,
@@ -61,7 +62,11 @@ export class StorageController {
   @Post('v1/storage/upload')
   @HttpCode(HttpStatus.CREATED)
   @Roles(Role.ADMIN, Role.USER)
-  @UseInterceptors(FileInterceptor('file'))
+  // O limite precisa estar no multer: sem ele o corpo inteiro e bufferizado em
+  // memoria antes de qualquer validacao no handler.
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: MAX_FILE_SIZE, files: 1 } }),
+  )
   @ApiCookieAuth()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Envia um arquivo para o storage' })
@@ -75,14 +80,31 @@ export class StorageController {
   @ApiResponse({ status: 201, description: 'Arquivo enviado' })
   @ApiResponse({
     status: 400,
-    description: 'Arquivo ausente, grande demais ou de tipo não permitido',
+    description: 'Arquivo ausente ou de tipo não permitido',
     type: ErrorResponseSwagger,
   })
-  async upload(@UploadedFile() file: Express.Multer.File) {
+  @ApiResponse({
+    status: 413,
+    description: 'Arquivo excede o limite de 10MB',
+    type: ErrorResponseSwagger,
+  })
+  async upload(
+    @UploadedFile() file: Express.Multer.File,
+    @TenantId() tenantId: string | undefined,
+  ) {
     if (!file) {
       throw this.badRequest('Nenhum arquivo enviado');
     }
 
+    if (!tenantId) {
+      throw new DomainException(
+        ErrorCode.TENANT_CONTEXT_MISSING,
+        'Contexto de tenant ausente na requisição',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // Defesa em profundidade: o multer ja rejeita o excedente durante o stream.
     if (file.size > MAX_FILE_SIZE) {
       throw this.badRequest('Arquivo excede o limite de 10MB');
     }
@@ -106,12 +128,19 @@ export class StorageController {
     }
 
     const fileId = randomUUID();
+    const prefix = `uploads/${tenantId}`;
 
     if (this.imageProcessingService.isProcessable(detected.mime)) {
       let processed;
       try {
         processed = await this.imageProcessingService.process(file.buffer);
-      } catch {
+      } catch (error) {
+        this.logger.error(
+          `Falha ao processar imagem (${detected.mime}, ${file.size} bytes): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          error instanceof Error ? error.stack : undefined,
+        );
         throw this.badRequest(
           'Falha ao processar a imagem. Verifique se o arquivo é válido.',
         );
@@ -119,12 +148,12 @@ export class StorageController {
 
       const [optimized, thumbnail] = await Promise.all([
         this.storageService.upload(
-          `uploads/${fileId}.webp`,
+          `${prefix}/${fileId}.webp`,
           processed.optimizedBuffer,
           processed.optimizedMimeType,
         ),
         this.storageService.upload(
-          `uploads/${fileId}-thumb.webp`,
+          `${prefix}/${fileId}-thumb.webp`,
           processed.thumbnailBuffer,
           processed.thumbnailMimeType,
         ),
@@ -140,11 +169,11 @@ export class StorageController {
       };
     }
 
-    // originalname e entrada do usuario: usamos apenas a extensao, ja validada
-    // indiretamente pela deteccao de magic bytes acima.
-    const ext = extname(file.originalname).toLowerCase() || '.bin';
+    // A extensao vem da deteccao por magic bytes, nunca de originalname: assim
+    // ela sempre concorda com o conteudo validado e nao e controlada pelo cliente.
+    const ext = `.${detected.ext}`;
     const result = await this.storageService.upload(
-      `uploads/${fileId}${ext}`,
+      `${prefix}/${fileId}${ext}`,
       file.buffer,
       detected.mime,
     );
@@ -157,44 +186,6 @@ export class StorageController {
         thumbnailUrl: null,
       },
     };
-  }
-
-  @Get('v1/storage/public/images/*key')
-  @Public()
-  @ApiOperation({
-    summary: 'Redireciona para a URL assinada de uma imagem pública',
-  })
-  @ApiResponse({ status: 302, description: 'Redireciona para a URL assinada' })
-  @ApiResponse({
-    status: 400,
-    description: 'Chave inválida',
-    type: ErrorResponseSwagger,
-  })
-  async getPublicImage(
-    @Param('key') rawKey: string | string[],
-    @Res() res: Response,
-  ) {
-    const key = Array.isArray(rawKey) ? rawKey.join('/') : rawKey;
-    const ext = key ? key.slice(key.lastIndexOf('.')).toLowerCase() : '';
-
-    if (
-      !key ||
-      !key.startsWith('uploads/') ||
-      key.includes('..') ||
-      !ALLOWED_PUBLIC_EXTENSIONS.includes(ext)
-    ) {
-      throw new DomainException(
-        ErrorCode.STORAGE_INVALID_KEY,
-        'Chave de imagem inválida',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    const signedUrl = await this.storageService.getSignedUrl(
-      key,
-      PUBLIC_URL_EXPIRY_SECONDS,
-    );
-    res.redirect(302, signedUrl);
   }
 
   private badRequest(message: string): DomainException {
