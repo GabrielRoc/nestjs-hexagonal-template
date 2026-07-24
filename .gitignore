@@ -2,6 +2,7 @@
 /dist
 /node_modules
 /build
+*.tsbuildinfo
 
 # logs
 logs
@@ -40,3 +41,6 @@ lerna-debug.log*
 
 # Claude / AI agents
 .claude/
+.serena/
+.playwright-mcp/
+.worktrees/
