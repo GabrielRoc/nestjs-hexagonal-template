@@ -10,7 +10,7 @@ Antes de comecar, certifique-se de ter instalado:
 
 | Ferramenta | Versao Minima | Verificacao |
 |---|---|---|
-| **Node.js** | 20.x ou superior | `node --version` |
+| **Node.js** | 24.x (22.13+ LTS tambem suportado) | `node --version` |
 | **npm** | 10.x ou superior | `npm --version` |
 | **Docker** | 24.x ou superior | `docker --version` |
 | **Docker Compose** | 2.x ou superior | `docker compose version` |
