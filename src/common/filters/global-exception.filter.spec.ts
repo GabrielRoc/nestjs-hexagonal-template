@@ -1,4 +1,4 @@
-import { BadRequestException, HttpStatus } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
 import { GlobalExceptionFilter } from './global-exception.filter';
 import { DomainException } from '../exceptions/domain.exception';
@@ -48,10 +48,62 @@ describe('GlobalExceptionFilter', () => {
 
     expect(json).toHaveBeenCalledWith({
       error: {
-        code: 'HTTP_400',
+        code: 'VALIDATION_ERROR',
         message: 'Erro de validação',
         details: ['campo invalido'],
       },
+    });
+  });
+
+  it('preserva details em formato de objeto', () => {
+    filter.catch(
+      new BadRequestException({
+        code: 'X',
+        message: 'm',
+        details: { field: 'a' },
+      }),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+    expect(json).toHaveBeenCalledWith({
+      error: { code: 'X', message: 'm', details: { field: 'a' } },
+    });
+  });
+
+  it('nao sobrescreve details explicito com o array de message', () => {
+    filter.catch(
+      new BadRequestException({
+        code: 'X',
+        message: ['m1', 'm2'],
+        details: [{ field: 'a' }],
+      }),
+      host,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      error: {
+        code: 'X',
+        message: 'Erro de validação',
+        details: [{ field: 'a' }],
+      },
+    });
+  });
+
+  it('nao emite message em formato de objeto', () => {
+    filter.catch(new HttpException({ message: { pt: 'oi' } }, 400), host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+    expect(json).toHaveBeenCalledWith({
+      error: { code: 'HTTP_400', message: 'Http Exception' },
+    });
+  });
+
+  it('nao emite message numerica', () => {
+    filter.catch(new HttpException({ message: 42 }, 400), host);
+
+    expect(json).toHaveBeenCalledWith({
+      error: { code: 'HTTP_400', message: 'Http Exception' },
     });
   });
 

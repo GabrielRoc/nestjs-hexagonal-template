@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DomainException } from '../exceptions/domain.exception';
+import { ErrorCode } from '../enums/error-codes.enum';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -38,26 +39,37 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         exceptionResponse !== null
       ) {
         const resp = exceptionResponse as Record<string, unknown>;
+        const hasExplicitCode = typeof resp.code === 'string';
         // Preserva o code customizado (ex.: VALIDATION_ERROR do ZodValidationPipe)
-        if (typeof resp.code === 'string') {
-          code = resp.code;
+        if (hasExplicitCode) {
+          code = resp.code as string;
         }
-        // Preserva os erros por campo produzidos pelo Zod
-        if (Array.isArray(resp.details)) {
+        // Preserva os details em qualquer formato, como faz a DomainException
+        const hasExplicitDetails = resp.details !== undefined;
+        if (hasExplicitDetails) {
           details = resp.details;
         }
         if (Array.isArray(resp.message)) {
+          // Array de message e uma falha de validacao nativa do Nest
+          if (!hasExplicitCode) {
+            code = ErrorCode.VALIDATION_ERROR;
+          }
           message = 'Erro de validação';
-          details = resp.message;
+          // So deriva details do array de message quando nao veio details explicito
+          if (!hasExplicitDetails) {
+            details = resp.message;
+          }
         } else {
-          message = (resp.message as string) || exception.message;
+          // message precisa ser sempre string para nao quebrar o contrato da API
+          message =
+            typeof resp.message === 'string' ? resp.message : exception.message;
         }
       } else {
         message = exception.message;
       }
     } else {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
-      code = 'INTERNAL_ERROR';
+      code = ErrorCode.INTERNAL_ERROR;
       message = 'Erro interno do servidor';
       this.logger.error(
         'Unhandled exception',
