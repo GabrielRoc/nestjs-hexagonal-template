@@ -8,13 +8,19 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const poolMax = parseInt(
+        // Valores nao numericos ou nao positivos caem no padrao: 0 ou negativo
+        // deixaria o pool do pg inutilizavel.
+        const toPositiveInt = (raw: string, fallback: number): number => {
+          const parsed = parseInt(raw, 10);
+          return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+        };
+        const poolMax = toPositiveInt(
           config.get<string>('DATABASE_POOL_MAX', '20'),
-          10,
+          20,
         );
-        const idleTimeoutMillis = parseInt(
+        const idleTimeoutMillis = toPositiveInt(
           config.get<string>('DATABASE_POOL_IDLE_TIMEOUT', '30000'),
-          10,
+          30000,
         );
         return {
           type: 'postgres' as const,
@@ -27,10 +33,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
           synchronize: false,
           logging: config.get<string>('app.nodeEnv') === 'development',
           extra: {
-            max: isNaN(poolMax) ? 20 : poolMax,
-            idleTimeoutMillis: isNaN(idleTimeoutMillis)
-              ? 30000
-              : idleTimeoutMillis,
+            max: poolMax,
+            idleTimeoutMillis,
           },
         };
       },
