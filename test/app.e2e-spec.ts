@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 
 describe('App (e2e)', () => {
-  let app: INestApplication;
+  let app: INestApplication | undefined;
 
   beforeAll(async () => {
     // TODO: Configure test module with test database
