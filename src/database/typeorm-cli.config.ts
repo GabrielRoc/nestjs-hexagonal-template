@@ -11,5 +11,5 @@ export default new DataSource({
   password: process.env.DB_PASSWORD || 'postgres',
   database: process.env.DB_DATABASE || 'template_db',
   entities: ['dist/**/*.typeorm-entity.js'],
-  migrations: ['dist/database/migrations/*.js'],
+  migrations: ['dist/**/database/migrations/*.js'],
 });
