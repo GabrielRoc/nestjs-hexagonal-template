@@ -1,7 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { TerminusModule } from '@nestjs/terminus';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import {
   SuperTokensAuthGuard,
@@ -17,7 +16,7 @@ import { TenantModule } from './tenant/infrastructure/tenant.module';
 import { UserModule } from './user/infrastructure/user.module';
 import { SampleModule } from './sample/infrastructure/sample.module';
 import { StorageModule } from './storage/storage.module';
-import { HealthController } from './health/health.controller';
+import { HealthModule } from './health/health.module';
 
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -37,7 +36,6 @@ import { TenantContextMiddleware } from './common/middleware/tenant-context.midd
         limit: parseInt(process.env.THROTTLE_LIMIT || '100', 10),
       },
     ]),
-    TerminusModule,
     DatabaseModule,
     AuthModule,
     AuditLogModule,
@@ -46,8 +44,9 @@ import { TenantContextMiddleware } from './common/middleware/tenant-context.midd
     UserModule,
     SampleModule,
     StorageModule,
+    HealthModule,
   ],
-  controllers: [HealthController],
+  controllers: [],
   providers: [
     // Exception filters (order matters: last registered runs first)
     {
