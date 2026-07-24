@@ -8,12 +8,12 @@ Este guia descreve como configurar o ambiente de desenvolvimento do projeto do z
 
 Antes de comecar, certifique-se de ter instalado:
 
-| Ferramenta | Versao Minima | Verificacao |
-|---|---|---|
-| **Node.js** | 24.x (22.13+ LTS tambem suportado) | `node --version` |
-| **npm** | 10.x ou superior | `npm --version` |
-| **Docker** | 24.x ou superior | `docker --version` |
-| **Docker Compose** | 2.x ou superior | `docker compose version` |
+| Ferramenta         | Versao Minima                      | Verificacao              |
+| ------------------ | ---------------------------------- | ------------------------ |
+| **Node.js**        | 24.x (22.13+ LTS tambem suportado) | `node --version`         |
+| **npm**            | 10.x ou superior                   | `npm --version`          |
+| **Docker**         | 24.x ou superior                   | `docker --version`       |
+| **Docker Compose** | 2.x ou superior                    | `docker compose version` |
 
 ---
 
@@ -102,11 +102,11 @@ docker compose up -d
 
 Isso ira iniciar:
 
-| Servico | Porta | Descricao |
-|---|---|---|
-| **PostgreSQL 16** | 5432 | Banco de dados principal |
-| **SuperTokens** | 3567 | Servico de autenticacao |
-| **LocalStack** | 4566 | Emulador AWS S3 local |
+| Servico           | Porta | Descricao                |
+| ----------------- | ----- | ------------------------ |
+| **PostgreSQL 16** | 5432  | Banco de dados principal |
+| **SuperTokens**   | 3567  | Servico de autenticacao  |
+| **LocalStack**    | 4566  | Emulador AWS S3 local    |
 
 Verifique se todos os containers estao rodando:
 
@@ -155,6 +155,7 @@ http://localhost:3000/api/docs
 ```
 
 A interface Swagger permite:
+
 - Visualizar todos os endpoints disponiveis
 - Testar requisicoes diretamente no navegador
 - Ver os schemas de request/response
@@ -186,6 +187,7 @@ SUPERADMIN_SUPERTOKENS_IDS=<user-id-copiado>
 ### Via API
 
 Apos criar o usuario no SuperTokens, voce precisa registra-lo na aplicacao:
+
 - Crie um tenant (se ainda nao existir)
 - Associe o usuario ao tenant via endpoint de criacao de usuario
 
@@ -193,22 +195,22 @@ Apos criar o usuario no SuperTokens, voce precisa registra-lo na aplicacao:
 
 ## 9. Scripts Disponiveis
 
-| Script | Descricao |
-|---|---|
-| `npm run start:dev` | Servidor com hot-reload |
-| `npm run start:debug` | Servidor com debug (--inspect) |
-| `npm run build` | Compilar para producao |
-| `npm run start:prod` | Executar build de producao |
-| `npm run lint` | Executar ESLint com auto-fix |
-| `npm run format` | Formatar codigo com Prettier |
-| `npm test` | Executar testes unitarios |
-| `npm run test:watch` | Testes em modo watch |
-| `npm run test:cov` | Testes com relatorio de cobertura |
-| `npm run test:e2e` | Testes end-to-end |
-| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gerar migration |
-| `npm run migration:create -- src/database/migrations/NomeDaMigration` | Criar migration vazia |
-| `npm run migration:run` | Executar migrations pendentes |
-| `npm run migration:revert` | Reverter ultima migration |
+| Script                                                                  | Descricao                         |
+| ----------------------------------------------------------------------- | --------------------------------- |
+| `npm run start:dev`                                                     | Servidor com hot-reload           |
+| `npm run start:debug`                                                   | Servidor com debug (--inspect)    |
+| `npm run build`                                                         | Compilar para producao            |
+| `npm run start:prod`                                                    | Executar build de producao        |
+| `npm run lint`                                                          | Executar ESLint com auto-fix      |
+| `npm run format`                                                        | Formatar codigo com Prettier      |
+| `npm test`                                                              | Executar testes unitarios         |
+| `npm run test:watch`                                                    | Testes em modo watch              |
+| `npm run test:cov`                                                      | Testes com relatorio de cobertura |
+| `npm run test:e2e`                                                      | Testes end-to-end                 |
+| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gerar migration                   |
+| `npm run migration:create -- src/database/migrations/NomeDaMigration`   | Criar migration vazia             |
+| `npm run migration:run`                                                 | Executar migrations pendentes     |
+| `npm run migration:revert`                                              | Reverter ultima migration         |
 
 ---
 

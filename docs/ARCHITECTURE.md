@@ -61,11 +61,11 @@ graph TB
 
 O dominio e o coracao da aplicacao. Ele contem:
 
-| Artefato | Descricao |
-|---|---|
+| Artefato    | Descricao                                                                           |
+| ----------- | ----------------------------------------------------------------------------------- |
 | `entities/` | Classes puras que representam conceitos do negocio (ex: `Sample`, `Tenant`, `User`) |
-| `ports/` | Interfaces que definem contratos de persistencia e servicos externos |
-| `services/` | Domain services com regras de negocio que nao pertencem a uma unica entidade |
+| `ports/`    | Interfaces que definem contratos de persistencia e servicos externos                |
+| `services/` | Domain services com regras de negocio que nao pertencem a uma unica entidade        |
 
 **Regra fundamental:** ZERO dependencias externas. Nenhum import de NestJS, TypeORM, AWS SDK ou qualquer biblioteca de infraestrutura. Apenas TypeScript puro.
 
@@ -107,11 +107,11 @@ export class Sample {
 
 A camada de aplicacao coordena o fluxo entre o mundo externo e o dominio:
 
-| Artefato | Descricao |
-|---|---|
+| Artefato     | Descricao                                                                                         |
+| ------------ | ------------------------------------------------------------------------------------------------- |
 | `use-cases/` | Classes `@Injectable()` que orquestram o fluxo: recebem DTO, convertem para dominio, chamam ports |
-| `dtos/` | Schemas Zod que definem contratos de entrada/saida. Tipos inferidos com `z.infer<>` |
-| `mappers/` | Funcoes estaticas para conversao entre camadas: `toDomain()`, `toResponse()` |
+| `dtos/`      | Schemas Zod que definem contratos de entrada/saida. Tipos inferidos com `z.infer<>`               |
+| `mappers/`   | Funcoes estaticas para conversao entre camadas: `toDomain()`, `toResponse()`                      |
 
 ```typescript
 // src/sample/application/use-cases/create-sample.use-case.ts
@@ -122,7 +122,10 @@ export class CreateSampleUseCase {
     private readonly sampleRepo: SampleRepositoryPort,
   ) {}
 
-  async execute(dto: CreateSampleDto, tenantId: string): Promise<SampleResponseDto> {
+  async execute(
+    dto: CreateSampleDto,
+    tenantId: string,
+  ): Promise<SampleResponseDto> {
     const sample = SampleMapper.toDomain(dto, tenantId);
     const saved = await this.sampleRepo.save(sample);
     return SampleMapper.toResponse(saved);
@@ -134,11 +137,11 @@ export class CreateSampleUseCase {
 
 A camada de infraestrutura contem tudo que interage com o mundo externo:
 
-| Artefato | Descricao |
-|---|---|
-| `http/` | Controllers NestJS com decorators de rota, validacao e Swagger |
+| Artefato       | Descricao                                                                          |
+| -------------- | ---------------------------------------------------------------------------------- |
+| `http/`        | Controllers NestJS com decorators de rota, validacao e Swagger                     |
 | `persistence/` | Entidades TypeORM (`.typeorm-entity.ts`) e repositorios (`.typeorm-repository.ts`) |
-| `*.module.ts` | Modulo NestJS que faz o wiring entre ports e adapters |
+| `*.module.ts`  | Modulo NestJS que faz o wiring entre ports e adapters                              |
 
 ---
 
@@ -194,7 +197,11 @@ export const SAMPLE_REPOSITORY = Symbol('SAMPLE_REPOSITORY');
 export interface SampleRepositoryPort {
   save(sample: Sample): Promise<Sample>;
   findById(id: string, tenantId: string): Promise<Sample | null>;
-  findAll(tenantId: string, page: number, perPage: number): Promise<[Sample[], number]>;
+  findAll(
+    tenantId: string,
+    page: number,
+    perPage: number,
+  ): Promise<[Sample[], number]>;
   update(sample: Sample): Promise<Sample>;
   softDelete(id: string, tenantId: string): Promise<void>;
 }

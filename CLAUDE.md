@@ -35,33 +35,33 @@ modulo/
 
 ### Modulos existentes
 
-| Modulo       | Caminho         | Descricao                                |
-|--------------|-----------------|------------------------------------------|
-| `auth`       | `src/auth/`     | Autenticacao via SuperTokens             |
-| `user`       | `src/user/`     | Gestao de usuarios                       |
-| `tenant`     | `src/tenant/`   | Multi-tenancy                            |
-| `audit-log`  | `src/audit-log/`| Log de auditoria                         |
-| `health`     | `src/health/`   | Health check                             |
-| `storage`    | `src/storage/`  | Upload de arquivos (S3)                  |
-| `sample`     | `src/sample/`   | Modulo de referencia (pode ser removido) |
-| `common`     | `src/common/`   | Guards, filters, pipes, decorators, utils|
+| Modulo      | Caminho          | Descricao                                 |
+| ----------- | ---------------- | ----------------------------------------- |
+| `auth`      | `src/auth/`      | Autenticacao via SuperTokens              |
+| `user`      | `src/user/`      | Gestao de usuarios                        |
+| `tenant`    | `src/tenant/`    | Multi-tenancy                             |
+| `audit-log` | `src/audit-log/` | Log de auditoria                          |
+| `health`    | `src/health/`    | Health check                              |
+| `storage`   | `src/storage/`   | Upload de arquivos (S3)                   |
+| `sample`    | `src/sample/`    | Modulo de referencia (pode ser removido)  |
+| `common`    | `src/common/`    | Guards, filters, pipes, decorators, utils |
 
 ---
 
 ## Convencoes Obrigatorias
 
 | Aspecto         | Regra                                                                 |
-|-----------------|-----------------------------------------------------------------------|
+| --------------- | --------------------------------------------------------------------- |
 | Idioma codigo   | Ingles para codigo, portugues para mensagens de usuario               |
 | Rotas           | kebab-case, plural (`/api/v1/audit-logs`)                             |
 | IDs             | UUID v4                                                               |
-| Datas           | ISO 8601 (`2024-01-15T10:30:00Z`)                                    |
+| Datas           | ISO 8601 (`2024-01-15T10:30:00Z`)                                     |
 | Moeda           | Inteiro em centavos (`1999` = R$ 19,99)                               |
 | Soft delete     | Campo `deletedAt` (nullable timestamp), nunca DELETE fisico           |
-| Respostas       | Envelope `{ data, meta? }` para listas; objeto direto para item unico|
+| Respostas       | Envelope `{ data, meta? }` para listas; objeto direto para item unico |
 | Codigos de erro | Enum centralizado em `common/exceptions/`                             |
 | Multi-tenancy   | Todo recurso possui `tenantId`; filtrar sempre nas queries            |
-| Controllers     | Apenas validam entrada (Zod) e delegam ao use case                   |
+| Controllers     | Apenas validam entrada (Zod) e delegam ao use case                    |
 
 ---
 
@@ -92,7 +92,10 @@ export class CreateSampleUseCase {
     private readonly sampleRepository: SampleRepository,
   ) {}
 
-  async execute(dto: CreateSampleDto, tenantId: string): Promise<SampleResponseDto> {
+  async execute(
+    dto: CreateSampleDto,
+    tenantId: string,
+  ): Promise<SampleResponseDto> {
     // logica de negocio
   }
 }
@@ -114,8 +117,12 @@ Classes estaticas com metodos `toDto()` e `toEntity()`:
 
 ```typescript
 export class SampleMapper {
-  static toDto(entity: SampleEntity): SampleResponseDto { /* ... */ }
-  static toEntity(dto: CreateSampleDto): SampleEntity { /* ... */ }
+  static toDto(entity: SampleEntity): SampleResponseDto {
+    /* ... */
+  }
+  static toEntity(dto: CreateSampleDto): SampleEntity {
+    /* ... */
+  }
 }
 ```
 
@@ -156,15 +163,15 @@ export class SampleOrmEntity {
 
 ## Comandos
 
-| Comando                       | Descricao                              |
-|-------------------------------|----------------------------------------|
-| `npm run start:dev`           | Inicia em modo watch                   |
-| `npm run build`               | Compila o projeto                      |
-| `npm run lint`                | Executa ESLint com auto-fix            |
-| `npm test`                    | Executa testes unitarios               |
-| `npm run test:e2e`            | Executa testes end-to-end              |
-| `npm run migration:generate`  | Gera nova migration TypeORM            |
-| `npm run migration:run`       | Executa migrations pendentes           |
+| Comando                      | Descricao                    |
+| ---------------------------- | ---------------------------- |
+| `npm run start:dev`          | Inicia em modo watch         |
+| `npm run build`              | Compila o projeto            |
+| `npm run lint`               | Executa ESLint com auto-fix  |
+| `npm test`                   | Executa testes unitarios     |
+| `npm run test:e2e`           | Executa testes end-to-end    |
+| `npm run migration:generate` | Gera nova migration TypeORM  |
+| `npm run migration:run`      | Executa migrations pendentes |
 
 ---
 

@@ -71,17 +71,17 @@ Todos os commits devem seguir o padrao [Conventional Commits](https://www.conven
 
 ### Tipos Permitidos
 
-| Tipo | Descricao |
-|---|---|
-| `feat` | Nova funcionalidade |
-| `fix` | Correcao de bug |
-| `chore` | Manutencao (deps, configs, scripts) |
+| Tipo       | Descricao                                |
+| ---------- | ---------------------------------------- |
+| `feat`     | Nova funcionalidade                      |
+| `fix`      | Correcao de bug                          |
+| `chore`    | Manutencao (deps, configs, scripts)      |
 | `refactor` | Refatoracao sem mudanca de comportamento |
-| `test` | Adicao ou correcao de testes |
-| `docs` | Alteracao em documentacao |
-| `style` | Formatacao, whitespace, ponto e virgula |
-| `perf` | Melhoria de performance |
-| `ci` | Configuracao de CI/CD |
+| `test`     | Adicao ou correcao de testes             |
+| `docs`     | Alteracao em documentacao                |
+| `style`    | Formatacao, whitespace, ponto e virgula  |
+| `perf`     | Melhoria de performance                  |
+| `ci`       | Configuracao de CI/CD                    |
 
 ### Exemplos
 
