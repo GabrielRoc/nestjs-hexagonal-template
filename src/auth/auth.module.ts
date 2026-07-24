@@ -30,7 +30,16 @@ import Dashboard from 'supertokens-node/recipe/dashboard';
             apiBasePath: '/api/auth',
             websiteBasePath: '/auth',
           },
-          recipeList: [EmailPassword.init(), Session.init(), Dashboard.init()],
+          recipeList: [
+            EmailPassword.init(),
+            Session.init({
+              getTokenTransferMethod: () => 'cookie',
+              cookieSameSite: 'none',
+              cookieSecure: true,
+              antiCsrf: 'VIA_CUSTOM_HEADER',
+            }),
+            Dashboard.init(),
+          ],
         };
       },
     }),
