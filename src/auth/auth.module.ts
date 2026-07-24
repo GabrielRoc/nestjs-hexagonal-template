@@ -32,12 +32,9 @@ import Dashboard from 'supertokens-node/recipe/dashboard';
           },
           recipeList: [
             EmailPassword.init(),
-            Session.init({
-              getTokenTransferMethod: () => 'cookie',
-              cookieSameSite: 'none',
-              cookieSecure: true,
-              antiCsrf: 'VIA_CUSTOM_HEADER',
-            }),
+            // O SDK deriva cookieSameSite, cookieSecure e antiCsrf a partir de
+            // apiDomain/websiteDomain; nao sobrescreva sem necessidade real.
+            Session.init(),
             Dashboard.init(),
           ],
         };
