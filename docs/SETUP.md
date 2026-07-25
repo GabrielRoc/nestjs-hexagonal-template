@@ -317,3 +317,13 @@ Em ambientes WSL2 ou com volumes Docker, o file watching pode falhar. Tente:
 # Usar polling ao inves de inotify
 npm run start:dev -- --watchAll
 ```
+
+---
+
+## Pre-requisitos de Producao
+
+Itens que o template nao resolve sozinho e precisam existir no ambiente de deploy:
+
+- **Rate limit por IP em `/api/auth/*` no proxy ou WAF.** O `ThrottlerGuard` e um `APP_GUARD` e essas rotas nunca chegam aos guards: o middleware Express do `supertokens-nestjs` responde sem chamar `next()`. Sem limite no proxy, login e signup ficam sem protecao contra forca bruta.
+- **`TRUST_PROXY_HOPS` igual ao numero de proxies na frente da app.** Sem isso o throttler usa o IP do balanceador e todos os clientes dividem o mesmo balde. Nunca defina um valor maior que o numero real de proxies: `X-Forwarded-For` passa a ser falsificavel.
+- **Storage compartilhado para o throttler, se rodar mais de uma replica.** O default e in-memory por processo: o limite efetivo vira `THROTTLE_LIMIT` x numero de processos e zera a cada restart.
