@@ -65,7 +65,20 @@ export class StorageController {
   // O limite precisa estar no multer: sem ele o corpo inteiro e bufferizado em
   // memoria antes de qualquer validacao no handler.
   @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: MAX_FILE_SIZE, files: 1 } }),
+    FileInterceptor('file', {
+      // fields/parts sao Infinity por padrao no busboy e cada campo de texto e
+      // acumulado em req.body (memoria externa, fora do heap) antes do handler:
+      // uma unica requisicao com milhares de partes derruba o processo por OOM.
+      // Se um campo de texto passar a ser necessario, use fields: <n exato> e
+      // parts: fields + files + 1.
+      limits: {
+        fileSize: MAX_FILE_SIZE,
+        files: 1,
+        fields: 0,
+        parts: 2,
+        fieldSize: 1024,
+      },
+    }),
   )
   @ApiCookieAuth()
   @ApiConsumes('multipart/form-data')
