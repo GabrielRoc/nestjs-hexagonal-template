@@ -5,7 +5,11 @@ export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
 export interface UserRepositoryPort {
   save(user: User): Promise<User>;
   findById(id: string, tenantId: string): Promise<User | null>;
-  findAll(tenantId: string): Promise<User[]>;
+  findAll(
+    tenantId: string,
+    page: number,
+    perPage: number,
+  ): Promise<[User[], number]>;
   update(user: User): Promise<User>;
   softDelete(id: string, tenantId: string): Promise<void>;
   findByEmail(email: string, tenantId: string): Promise<User | null>;

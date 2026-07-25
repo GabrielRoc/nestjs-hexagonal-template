@@ -32,12 +32,18 @@ export class UserTypeormRepository implements UserRepositoryPort {
     return entity ? this.toDomain(entity) : null;
   }
 
-  async findAll(tenantId: string): Promise<User[]> {
-    const entities = await this.repo.find({
+  async findAll(
+    tenantId: string,
+    page: number,
+    perPage: number,
+  ): Promise<[User[], number]> {
+    const [entities, total] = await this.repo.findAndCount({
       where: { tenantId },
       order: { createdAt: 'DESC' },
+      skip: (page - 1) * perPage,
+      take: perPage,
     });
-    return entities.map((e) => this.toDomain(e));
+    return [entities.map((e) => this.toDomain(e)), total];
   }
 
   async update(user: User): Promise<User> {

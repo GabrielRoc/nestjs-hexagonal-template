@@ -9,12 +9,24 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiExtraModels,
+  getSchemaPath,
+} from '@nestjs/swagger';
 import { Roles, CurrentUser, TenantId } from '../../../common/decorators';
 import { Role } from '../../../common/enums/role.enum';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
-import { ErrorResponseSwagger } from '../../../common/swagger/common.swagger';
+import {
+  ErrorResponseSwagger,
+  PaginationMetaSwagger,
+} from '../../../common/swagger/common.swagger';
 import {
   createUserSchema,
   updateUserSchema,
@@ -49,10 +61,33 @@ export class UserController {
 
   @Get()
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'List users of the tenant' })
-  async list(@TenantId() tenantId: string) {
-    const users = await this.listUsersUseCase.execute(tenantId);
-    return { data: users };
+  @ApiOperation({ summary: 'List users of the tenant (paginated)' })
+  @ApiQuery({ name: 'page', required: false, example: '1' })
+  @ApiQuery({ name: 'perPage', required: false, example: '20' })
+  @ApiExtraModels(PaginationMetaSwagger)
+  @ApiResponse({
+    status: 200,
+    description: 'Lista paginada de usuários do tenant',
+    schema: {
+      type: 'object',
+      properties: {
+        data: { type: 'array', items: { type: 'object' } },
+        meta: {
+          type: 'object',
+          properties: {
+            pagination: { $ref: getSchemaPath(PaginationMetaSwagger) },
+          },
+        },
+      },
+    },
+  })
+  async list(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('perPage') perPage?: string,
+  ) {
+    // O use case ja devolve o envelope { data, meta.pagination }.
+    return this.listUsersUseCase.execute(tenantId, { page, perPage });
   }
 
   @Post()
