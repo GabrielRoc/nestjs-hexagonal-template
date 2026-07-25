@@ -86,6 +86,21 @@ describe('RealtimeGateway', () => {
     } as unknown as SessionContainer;
   }
 
+  /**
+   * Erro real do SDK, nao um `new Error(...)` com o nome do tipo no texto: o
+   * gateway discrimina via `Session.Error.isErrorFromSuperTokens`, que so
+   * reconhece instancias construidas pelo proprio SDK.
+   */
+  function sessionError(type: string): Error {
+    const options = {
+      message: `simulated ${type}`,
+      type,
+      payload: {},
+    } as unknown as ConstructorParameters<typeof Session.Error>[0];
+
+    return new Session.Error(options);
+  }
+
   describe('handleConnection', () => {
     it('recusa o handshake sem cookie sem chamar o SuperTokens nem o banco', async () => {
       const rejected = createClient();
@@ -128,15 +143,57 @@ describe('RealtimeGateway', () => {
       expect(client.join).not.toHaveBeenCalled();
     });
 
-    it('recusa quando o SuperTokens lanca (token expirado ou invalido)', async () => {
-      getSession.mockRejectedValue(new Error('TRY_REFRESH_TOKEN'));
+    it.each([
+      Session.Error.TRY_REFRESH_TOKEN,
+      Session.Error.UNAUTHORISED,
+      Session.Error.INVALID_CLAIMS,
+      Session.Error.CLEAR_DUPLICATE_SESSION_COOKIES,
+    ])('recusa quando o SuperTokens lanca %s', async (type) => {
+      getSession.mockRejectedValue(sessionError(type));
 
       await connect(client);
 
+      expect(client.emit).toHaveBeenCalledWith(REALTIME_UNAUTHORIZED_EVENT, {
+        message: 'Sessao invalida ou expirada.',
+      });
       expect(client.disconnect).toHaveBeenCalledWith(true);
       expect(client.join).not.toHaveBeenCalled();
-      // Sessao expirada e caso esperado, nao erro de servidor.
+      // Sessao expirada/invalida e caso esperado, nao erro de servidor.
       expect(logError).not.toHaveBeenCalled();
+    });
+
+    it('nao trata falha do proprio SuperTokens como sessao invalida', async () => {
+      // Core do SuperTokens fora do ar, JWKS inacessivel, timeout: erro comum,
+      // nao erro tipado do SDK. Se isso virasse "unauthorized", uma indisponi-
+      // bilidade do SuperTokens derrubaria a sessao de todos os usuarios.
+      getSession.mockRejectedValue(new Error('connect ECONNREFUSED'));
+
+      await connect(client);
+
+      expect(logError).toHaveBeenCalled();
+      expect(client.emit).not.toHaveBeenCalledWith(
+        REALTIME_UNAUTHORIZED_EVENT,
+        expect.anything(),
+      );
+      expect(client.disconnect).toHaveBeenCalledWith(true);
+      expect(client.join).not.toHaveBeenCalled();
+    });
+
+    it('nao trata erro do SuperTokens fora do contrato de sessao como sessao invalida', async () => {
+      // TOKEN_THEFT_DETECTED so vem de refreshSession: aparecer aqui significa
+      // contrato mudado, e isso tem de ficar visivel em log de erro.
+      getSession.mockRejectedValue(
+        sessionError(Session.Error.TOKEN_THEFT_DETECTED),
+      );
+
+      await connect(client);
+
+      expect(logError).toHaveBeenCalled();
+      expect(client.emit).not.toHaveBeenCalledWith(
+        REALTIME_UNAUTHORIZED_EVENT,
+        expect.anything(),
+      );
+      expect(client.join).not.toHaveBeenCalled();
     });
 
     it('coloca o socket apenas na sala do proprio tenant', async () => {

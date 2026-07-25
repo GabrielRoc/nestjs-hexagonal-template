@@ -18,6 +18,35 @@ import {
 } from './realtime.constants';
 import { RealtimeService } from './realtime.service';
 
+/**
+ * Tipos de erro com que o supertokens-node diz "esta sessao nao vale". Sao os
+ * UNICOS que podem ser tratados como "nao ha sessao": qualquer outro erro do
+ * `getSession` (core do SuperTokens fora do ar, JWKS inacessivel, timeout,
+ * contrato do SDK mudado nos shims) e falha de infraestrutura e tem de subir.
+ *
+ * `TOKEN_THEFT_DETECTED` esta fora de proposito: so `refreshSession` o lanca
+ * (`sessionFunctions.js`), entao aparecer aqui significa que algo saiu do
+ * contrato e queremos o log de erro, nao um "unauthorized" silencioso.
+ */
+const INVALID_SESSION_ERROR_TYPES: readonly string[] = [
+  Session.Error.UNAUTHORISED,
+  Session.Error.TRY_REFRESH_TOKEN,
+  Session.Error.INVALID_CLAIMS,
+  Session.Error.CLEAR_DUPLICATE_SESSION_COOKIES,
+];
+
+/**
+ * Devolve o tipo do erro quando ele significa "sessao invalida", ou null quando
+ * o erro e de outra natureza (e portanto precisa ser propagado).
+ */
+function invalidSessionErrorType(error: unknown): string | null {
+  if (!Session.Error.isErrorFromSuperTokens(error)) {
+    return null;
+  }
+
+  return INVALID_SESSION_ERROR_TYPES.includes(error.type) ? error.type : null;
+}
+
 /** Dados anexados ao socket depois de o handshake ser autenticado. */
 export interface RealtimeSocketData {
   tenantId: string;
@@ -107,6 +136,24 @@ function createSessionResponseShim() {
  * carregamento da classe, sem acesso a `ConfigService`, e foi exatamente por
  * isso que a origem virava `origin: true` (qualquer origem). A allowlist real
  * e aplicada pelo `RealtimeIoAdapter`, registrado em `main.ts`.
+ *
+ * ATENCAO — a autenticacao e verificada SO no handshake. Depois que o socket
+ * entra na sala do tenant nao ha revalidacao: revogar a sessao no SuperTokens
+ * (logout) ou desativar/remover o usuario NAO derruba um socket ja aberto, que
+ * segue recebendo os eventos do tenant enquanto a conexao TCP viver. O caminho
+ * HTTP, esse sim, bloqueia na requisicao seguinte.
+ *
+ * Isso e deliberado, e nao um esquecimento: `client.handshake.headers` e um
+ * snapshot congelado no upgrade, entao revalidar chamando `getSession` de novo
+ * derrubaria todo socket saudavel quando o access token daquele snapshot
+ * expirasse (1h no default do SuperTokens), mesmo com o usuario ativo e
+ * renovando a sessao pelas rotas HTTP. Se a janela de exposicao for inaceitavel
+ * no seu projeto, as duas saidas reais sao: (a) revalidar periodicamente apenas
+ * a parte de banco — guardar o `supertokensUserId` em `client.data` e reexecutar
+ * `findActiveBySupertokensUserId` num intervalo, desconectando quem nao resolver
+ * mais (custo: uma query por socket por ciclo); ou (b) desconectar de forma
+ * dirigida quando o usuario e desativado, expondo no `RealtimeService` um
+ * `disconnect(tenantId, ...)` chamado pelo use case correspondente.
  */
 @WebSocketGateway({ namespace: REALTIME_NAMESPACE })
 export class RealtimeGateway
@@ -159,9 +206,13 @@ export class RealtimeGateway
         `Client ${client.id} joined room ${tenantRoom(tenantId)}`,
       );
     } catch (error) {
-      // Chega aqui o que NAO e "sessao invalida": banco fora, port quebrado.
-      // Nao pode ser confundido com falha de autenticacao — por isso o repo e
-      // consultado fora do try/catch de `getSession`.
+      // Chega aqui o que NAO e "sessao invalida": banco fora, port quebrado,
+      // core do SuperTokens/JWKS inacessivel. Nada disso pode ser confundido com
+      // falha de autenticacao — por isso o repo e consultado fora do try/catch
+      // de `getSession` e o proprio `getSession` so trata como "sem sessao" os
+      // tipos de erro de INVALID_SESSION_ERROR_TYPES, propagando o resto.
+      // O cliente e desconectado sem `unauthorized`: o front deve reconectar com
+      // backoff, nao derrubar a sessao do usuario.
       this.logger.error(
         `WebSocket connection error (${client.id}): ${describeError(error)}`,
       );
@@ -227,10 +278,26 @@ export class RealtimeGateway
 
       return session.getUserId();
     } catch (error) {
+      const invalidSessionType = invalidSessionErrorType(error);
+
+      if (invalidSessionType === null) {
+        // Engolir aqui seria o pior resultado possivel: com o core do
+        // SuperTokens fora do ar, TODO handshake — inclusive de cookie valido —
+        // viraria "sessao invalida", o front derrubaria a sessao do usuario e o
+        // log ficaria identico ao de um token expirado de rotina. Sobe para o
+        // catch de `handleConnection`, que loga em `error` e nao emite
+        // `unauthorized`.
+        throw error;
+      }
+
       // Token expirado (TRY_REFRESH_TOKEN) e token invalido (UNAUTHORISED) vem
-      // como excecao mesmo com sessionRequired: false.
-      this.logger.debug(
-        `Session validation failed (client ${client.id}): ${describeError(error)}`,
+      // como excecao mesmo com sessionRequired: false. `warn` e nao `debug`
+      // porque `debug` e descartado com LOG_LEVEL=info, o default em producao
+      // (ver logger.service.ts): sem o motivo neste nivel nao ha como saber por
+      // que os handshakes estao sendo recusados.
+      this.logger.warn(
+        `Session validation failed (client ${client.id}): ` +
+          `${invalidSessionType} (${describeError(error)})`,
       );
       return null;
     }
