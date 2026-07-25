@@ -202,8 +202,23 @@ export class SampleController {
   // pedido ainda nao aconteceu quando a resposta sai.
   @Post(':id/deactivations')
   @HttpCode(HttpStatus.ACCEPTED)
+  // Mesmo papel do PATCH: enfileirar a desativacao e a mesma escrita, apenas
+  // assincrona. Rota de fila sem `@Roles` deixa quem so podia ler mudando o
+  // registro pelo caminho de tras.
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Schedule sample deactivation (background job)' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 202, description: 'Job de desativacao enfileirado' })
+  @ApiResponse({
+    status: 400,
+    description: 'Erro de validacao (VALIDATION_ERROR)',
+    type: ErrorResponseSwagger,
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Papel insuficiente (AUTH_INSUFFICIENT_ROLE)',
+    type: ErrorResponseSwagger,
+  })
   @ApiResponse({
     status: 404,
     description: 'Sample nao encontrado',
