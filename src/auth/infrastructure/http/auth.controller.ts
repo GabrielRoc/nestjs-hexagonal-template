@@ -1,5 +1,13 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { TurnstileGuard } from '../../../anti-bot/infrastructure/guards/turnstile.guard';
 import { Public, SkipAuditBody } from '../../../common/decorators';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import { ErrorResponseSwagger } from '../../../common/swagger/common.swagger';
@@ -28,10 +36,15 @@ import { ResetPasswordUseCase } from '../../application/use-cases/reset-password
  * mensagens em portugues e o envelope de erro do template.
  *
  * Sendo publicas e nao autenticadas, sao alvo natural de abuso automatizado. O
- * ThrottlerGuard global ja limita a taxa por IP; para defesa contra bots
- * (CAPTCHA/Turnstile) aplique o guard do modulo anti-bot aqui com
- * `@UseGuards(TurnstileGuard)` em cada rota, junto do `@Public()`. O modulo
- * anti-bot e entregue separadamente e nao e dependencia deste fluxo.
+ * ThrottlerGuard global limita a taxa por IP, e o `TurnstileGuard` do modulo
+ * anti-bot esta aplicado nas duas rotas: ele passa direto enquanto
+ * `TURNSTILE_ENABLED` nao for `true`, e vira exigencia de CAPTCHA no momento em
+ * que o operador configurar as chaves — sem tocar em codigo.
+ *
+ * O stack completo (`@AntiBot()`) NAO cabe aqui: o FormTokenGuard falha fechado
+ * e exigiria que a tela de recuperacao buscasse um token antes do submit, o que
+ * este template nao pode assumir do frontend de quem clonar. Turnstile e a
+ * camada que funciona sem cooperacao previa do formulario.
  */
 @ApiTags('Auth')
 @Controller('v1/auth')
@@ -43,6 +56,7 @@ export class AuthController {
 
   @Post('forgot-password')
   @Public()
+  @UseGuards(TurnstileGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Request a password reset e-mail',
@@ -54,7 +68,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Solicitação recebida' })
   @ApiResponse({
     status: 400,
-    description: 'Erro de validação',
+    description: 'Erro de validação ou verificação de CAPTCHA',
     type: ErrorResponseSwagger,
   })
   async forgotPassword(
@@ -65,6 +79,7 @@ export class AuthController {
 
   @Post('reset-password')
   @Public()
+  @UseGuards(TurnstileGuard)
   @SkipAuditBody()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Consume the reset token and set a new password' })
@@ -72,7 +87,8 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Senha atualizada' })
   @ApiResponse({
     status: 400,
-    description: 'Token inválido/expirado ou senha fora da política',
+    description:
+      'Token inválido/expirado, senha fora da política ou CAPTCHA inválido',
     type: ErrorResponseSwagger,
   })
   async resetPassword(

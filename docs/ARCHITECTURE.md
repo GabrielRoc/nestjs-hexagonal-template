@@ -401,6 +401,7 @@ src/
   health/                  # Health check endpoint
   auth/                    # SuperTokens integration
   storage/                 # S3/LocalStack storage adapter
+  anti-bot/                # Camadas anti-bot opt-in (@AntiBot), ports + guards
 
   audit-log/               # Modulo de log de auditoria
     domain/

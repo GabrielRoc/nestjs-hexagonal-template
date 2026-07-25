@@ -5,6 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import SuperTokens from 'supertokens-node';
+import { FORM_TOKEN_HEADER } from './anti-bot/anti-bot.constants';
 import { AppModule } from './app.module';
 import { AppLoggerService } from './logger/logger.service';
 
@@ -33,10 +34,17 @@ async function bootstrap() {
   const corsOrigins = app
     .get(ConfigService)
     .get<string[]>('app.corsOrigins', ['http://localhost:3001']);
+  // FORM_TOKEN_HEADER precisa estar aqui: header customizado dispara preflight, e
+  // sem ele no Access-Control-Allow-Headers o navegador bloqueia a submissao de
+  // qualquer formulario protegido por `@AntiBot()` vindo de outra origem.
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
-    allowedHeaders: ['content-type', ...SuperTokens.getAllCORSHeaders()],
+    allowedHeaders: [
+      'content-type',
+      FORM_TOKEN_HEADER,
+      ...SuperTokens.getAllCORSHeaders(),
+    ],
   });
 
   // Global prefix

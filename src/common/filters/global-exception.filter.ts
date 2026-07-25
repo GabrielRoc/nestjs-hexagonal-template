@@ -18,6 +18,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
+    // Um guard pode ter respondido e retornado `false` (e o que o HoneypotGuard
+    // faz para devolver um sucesso falso). O Nest converte esse `false` em
+    // ForbiddenException e cai aqui: escrever de novo lanca ERR_HTTP_HEADERS_SENT
+    // dentro do filtro, o socket morre e o cliente ve a conexao cair — ou seja,
+    // o bot descobriria pelo comportamento anomalo qual campo era a isca.
+    if (response.headersSent) {
+      return;
+    }
+
     let status: number;
     let code: string;
     let message: string;

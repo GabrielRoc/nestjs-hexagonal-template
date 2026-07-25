@@ -88,6 +88,15 @@ LOG_LEVEL=debug
 # Throttling
 THROTTLE_TTL=60000
 THROTTLE_LIMIT=100
+
+# Anti-bot (opt-in por rota; ver .env.example para os comentarios completos)
+ANTI_BOT_TOKEN_SECRET=
+ANTI_BOT_MIN_TIME_MS=2000
+ANTI_BOT_MAX_TIME_MS=1800000
+TURNSTILE_ENABLED=false
+TURNSTILE_SITE_KEY=
+TURNSTILE_SECRET_KEY=
+TURNSTILE_FAIL_OPEN=true
 ```
 
 Para desenvolvimento local, os valores padrao funcionam sem alteracoes.
@@ -332,5 +341,6 @@ Itens que o template nao resolve sozinho e precisam existir no ambiente de deplo
 - **Rate limit por IP em `/api/auth/*` no proxy ou WAF.** O `ThrottlerGuard` e um `APP_GUARD` e essas rotas nunca chegam aos guards: o middleware Express do `supertokens-nestjs` responde sem chamar `next()`. Sem limite no proxy, login e signup ficam sem protecao contra forca bruta.
 - **`TRUST_PROXY_HOPS` igual ao numero de proxies na frente da app.** Sem isso o throttler usa o IP do balanceador e todos os clientes dividem o mesmo balde. Nunca defina um valor maior que o numero real de proxies: `X-Forwarded-For` passa a ser falsificavel.
 - **Storage compartilhado para o throttler, se rodar mais de uma replica.** O default e in-memory por processo: o limite efetivo vira `THROTTLE_LIMIT` x numero de processos e zera a cada restart.
+- **`ANTI_BOT_TOKEN_SECRET` definido, se alguma rota usa `@AntiBot()`.** Sem a variavel a app gera uma chave aleatoria por processo e registra `ERROR` no boot: os form tokens deixam de valer no restart e nao validam entre instancias, entao parte das submissoes legitimas e rejeitada. O registro de tokens usados tambem e in-memory por processo — para uso unico global, ligue um `TOKEN_STORE` compartilhado (ver `src/anti-bot/infrastructure/persistence/token-store.provider.ts`).
 - **`s3:ListBucket` na role/usuario IAM da aplicacao, alem de `s3:PutObject`, `s3:GetObject` e `s3:DeleteObject`.** O check de storage do `GET /api/health` usa `HeadBucketCommand`, que exige `s3:ListBucket` sobre o bucket. Uma politica de menor privilegio so com as tres permissoes de objeto faz o health responder **503 permanente** num deploy perfeitamente saudavel -- os uploads funcionam, o health nao.
 - **Nao deixe `AWS_S3_BUCKET` vazio se a aplicacao usa storage.** Sem a variavel o check de storage e ignorado (`configured: false`) e o health continua 200: e proposital para deploys que nao usam S3, mas nao protege quem esqueceu de configurar.
