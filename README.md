@@ -89,15 +89,18 @@ src/
 
 ## Available Scripts
 
-| Script                                                                | Description                                             |
-| --------------------------------------------------------------------- | ------------------------------------------------------- |
-| `npm run start:dev`                                                   | Start the app in watch mode                             |
-| `npm run build`                                                       | Compile the project                                     |
-| `npm run lint`                                                        | Run ESLint with auto-fix                                |
-| `npm test`                                                            | Run unit tests                                          |
-| `npm run test:e2e`                                                    | Run end-to-end tests                                    |
-| `npm run migration:generate -- src/database/migrations/MigrationName` | Generate a new TypeORM migration (the path is required) |
-| `npm run migration:run`                                               | Run pending migrations                                  |
+| Script                                                                | Description                                                          |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `npm run start:dev`                                                   | Start the app in watch mode                                          |
+| `npm run build`                                                       | Compile the project                                                  |
+| `npm run lint`                                                        | Run ESLint with auto-fix                                             |
+| `npm run lint:check`                                                  | ESLint without auto-fix, `--max-warnings 0` (CI gate)                |
+| `npm run format:check`                                                | Prettier in check mode, covers `docs/**/*.md` and `.github/**/*.yml` |
+| `npm run typecheck`                                                   | `tsc --noEmit` over the whole project, including `test/`             |
+| `npm test`                                                            | Run unit tests                                                       |
+| `npm run test:e2e`                                                    | Run end-to-end tests                                                 |
+| `npm run migration:generate -- src/database/migrations/MigrationName` | Generate a new TypeORM migration (the path is required)              |
+| `npm run migration:run`                                               | Run pending migrations                                               |
 
 ---
 

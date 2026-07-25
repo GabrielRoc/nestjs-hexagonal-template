@@ -163,15 +163,18 @@ export class SampleOrmEntity {
 
 ## Comandos
 
-| Comando                                                                 | Descricao                                          |
-| ----------------------------------------------------------------------- | -------------------------------------------------- |
-| `npm run start:dev`                                                     | Inicia em modo watch                               |
-| `npm run build`                                                         | Compila o projeto                                  |
-| `npm run lint`                                                          | Executa ESLint com auto-fix                        |
-| `npm test`                                                              | Executa testes unitarios                           |
-| `npm run test:e2e`                                                      | Executa testes end-to-end                          |
-| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gera nova migration TypeORM (o path e obrigatorio) |
-| `npm run migration:run`                                                 | Executa migrations pendentes                       |
+| Comando                                                                 | Descricao                                                          |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `npm run start:dev`                                                     | Inicia em modo watch                                               |
+| `npm run build`                                                         | Compila o projeto                                                  |
+| `npm run lint`                                                          | Executa ESLint com auto-fix                                        |
+| `npm run lint:check`                                                    | ESLint sem auto-fix, `--max-warnings 0` (gate do CI)               |
+| `npm run format:check`                                                  | Prettier em modo check, inclui `docs/**/*.md` e `.github/**/*.yml` |
+| `npm run typecheck`                                                     | `tsc --noEmit` sobre o projeto inteiro, incluindo `test/`          |
+| `npm test`                                                              | Executa testes unitarios                                           |
+| `npm run test:e2e`                                                      | Executa testes end-to-end                                          |
+| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gera nova migration TypeORM (o path e obrigatorio)                 |
+| `npm run migration:run`                                                 | Executa migrations pendentes                                       |
 
 ---
 

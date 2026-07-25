@@ -195,22 +195,25 @@ Apos criar o usuario no SuperTokens, voce precisa registra-lo na aplicacao:
 
 ## 9. Scripts Disponiveis
 
-| Script                                                                  | Descricao                         |
-| ----------------------------------------------------------------------- | --------------------------------- |
-| `npm run start:dev`                                                     | Servidor com hot-reload           |
-| `npm run start:debug`                                                   | Servidor com debug (--inspect)    |
-| `npm run build`                                                         | Compilar para producao            |
-| `npm run start:prod`                                                    | Executar build de producao        |
-| `npm run lint`                                                          | Executar ESLint com auto-fix      |
-| `npm run format`                                                        | Formatar codigo com Prettier      |
-| `npm test`                                                              | Executar testes unitarios         |
-| `npm run test:watch`                                                    | Testes em modo watch              |
-| `npm run test:cov`                                                      | Testes com relatorio de cobertura |
-| `npm run test:e2e`                                                      | Testes end-to-end                 |
-| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gerar migration                   |
-| `npm run migration:create -- src/database/migrations/NomeDaMigration`   | Criar migration vazia             |
-| `npm run migration:run`                                                 | Executar migrations pendentes     |
-| `npm run migration:revert`                                              | Reverter ultima migration         |
+| Script                                                                  | Descricao                                                          |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `npm run start:dev`                                                     | Servidor com hot-reload                                            |
+| `npm run start:debug`                                                   | Servidor com debug (--inspect)                                     |
+| `npm run build`                                                         | Compilar para producao                                             |
+| `npm run start:prod`                                                    | Executar build de producao                                         |
+| `npm run lint`                                                          | Executar ESLint com auto-fix                                       |
+| `npm run lint:check`                                                    | ESLint sem auto-fix, `--max-warnings 0` (gate do CI)               |
+| `npm run format`                                                        | Formatar codigo com Prettier                                       |
+| `npm run format:check`                                                  | Prettier em modo check, inclui `docs/**/*.md` e `.github/**/*.yml` |
+| `npm run typecheck`                                                     | `tsc --noEmit` sobre o projeto inteiro, incluindo `test/`          |
+| `npm test`                                                              | Executar testes unitarios                                          |
+| `npm run test:watch`                                                    | Testes em modo watch                                               |
+| `npm run test:cov`                                                      | Testes com relatorio de cobertura                                  |
+| `npm run test:e2e`                                                      | Testes end-to-end                                                  |
+| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gerar migration                                                    |
+| `npm run migration:create -- src/database/migrations/NomeDaMigration`   | Criar migration vazia                                              |
+| `npm run migration:run`                                                 | Executar migrations pendentes                                      |
+| `npm run migration:revert`                                              | Reverter ultima migration                                          |
 
 ---
 
