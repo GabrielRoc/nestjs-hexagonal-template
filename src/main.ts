@@ -1,5 +1,7 @@
 import './instrument';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import SuperTokens from 'supertokens-node';
@@ -7,7 +9,7 @@ import { AppModule } from './app.module';
 import { AppLoggerService } from './logger/logger.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
     rawBody: true,
   });
@@ -15,13 +17,22 @@ async function bootstrap() {
   const logger = app.get(AppLoggerService);
   app.useLogger(logger);
 
+  // O ThrottlerGuard usa req.ip. Sem trust proxy, atras de ALB/nginx/ingress
+  // todos os clientes compartilham o MESMO balde de rate limit (um usuario
+  // queima os 100/min de todos). Nunca ligar sem proxy na frente: habilita
+  // spoof de X-Forwarded-For e burla completa do rate limit.
+  app.set(
+    'trust proxy',
+    process.env.TRUST_PROXY_HOPS ? Number(process.env.TRUST_PROXY_HOPS) : false,
+  );
+
   // Security
   app.use(helmet());
 
   // CORS
-  const corsOrigins = (
-    process.env.CORS_ORIGINS || 'http://localhost:3001'
-  ).split(',');
+  const corsOrigins = app
+    .get(ConfigService)
+    .get<string[]>('app.corsOrigins', ['http://localhost:3001']);
   app.enableCors({
     origin: corsOrigins,
     credentials: true,

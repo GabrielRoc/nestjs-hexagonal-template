@@ -48,7 +48,8 @@ O arquivo `.env.example` contem todas as variaveis necessarias com valores padra
 # Application
 NODE_ENV=development
 PORT=3000
-CORS_ORIGINS=http://localhost:3001
+CORS_ORIGINS=http://localhost:3001,http://localhost:3002
+TRUST_PROXY_HOPS=0
 
 # Database
 DB_HOST=localhost
