@@ -232,25 +232,25 @@ Apos criar o usuario no SuperTokens, voce precisa registra-lo na aplicacao:
 
 ## 9. Scripts Disponiveis
 
-| Script                                                                  | Descricao                                                          |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `npm run start:dev`                                                     | Servidor com hot-reload                                            |
-| `npm run start:debug`                                                   | Servidor com debug (--inspect)                                     |
-| `npm run build`                                                         | Compilar para producao                                             |
-| `npm run start:prod`                                                    | Executar build de producao                                         |
-| `npm run lint`                                                          | Executar ESLint com auto-fix                                       |
-| `npm run lint:check`                                                    | ESLint sem auto-fix, `--max-warnings 0` (gate do CI)               |
-| `npm run format`                                                        | Formatar codigo com Prettier                                       |
-| `npm run format:check`                                                  | Prettier em modo check, inclui `docs/**/*.md` e `.github/**/*.yml` |
-| `npm run typecheck`                                                     | `tsc --noEmit` sobre o projeto inteiro, incluindo `test/`          |
-| `npm test`                                                              | Executar testes unitarios                                          |
-| `npm run test:watch`                                                    | Testes em modo watch                                               |
-| `npm run test:cov`                                                      | Testes com relatorio de cobertura                                  |
-| `npm run test:e2e`                                                      | Testes end-to-end                                                  |
-| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gerar migration                                                    |
-| `npm run migration:create -- src/database/migrations/NomeDaMigration`   | Criar migration vazia                                              |
-| `npm run migration:run`                                                 | Executar migrations pendentes                                      |
-| `npm run migration:revert`                                              | Reverter ultima migration                                          |
+| Script                                                                  | Descricao                                                    |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `npm run start:dev`                                                     | Servidor com hot-reload                                      |
+| `npm run start:debug`                                                   | Servidor com debug (--inspect)                               |
+| `npm run build`                                                         | Compilar para producao                                       |
+| `npm run start:prod`                                                    | Executar build de producao                                   |
+| `npm run lint`                                                          | Executar ESLint com auto-fix                                 |
+| `npm run lint:check`                                                    | ESLint sem auto-fix, `--max-warnings 0` (gate do CI)         |
+| `npm run format`                                                        | Formatar codigo com Prettier                                 |
+| `npm run format:check`                                                  | Prettier em modo check; cobre `docs/`, `.github/` e `infra/` |
+| `npm run typecheck`                                                     | `tsc --noEmit` sobre o projeto inteiro, incluindo `test/`    |
+| `npm test`                                                              | Executar testes unitarios                                    |
+| `npm run test:watch`                                                    | Testes em modo watch                                         |
+| `npm run test:cov`                                                      | Testes com relatorio de cobertura                            |
+| `npm run test:e2e`                                                      | Testes end-to-end                                            |
+| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gerar migration                                              |
+| `npm run migration:create -- src/database/migrations/NomeDaMigration`   | Criar migration vazia                                        |
+| `npm run migration:run`                                                 | Executar migrations pendentes                                |
+| `npm run migration:revert`                                              | Reverter ultima migration                                    |
 
 ---
 
@@ -350,5 +350,43 @@ Itens que o template nao resolve sozinho e precisam existir no ambiente de deplo
 - **`TRUST_PROXY_HOPS` igual ao numero de proxies na frente da app.** Sem isso o throttler usa o IP do balanceador e todos os clientes dividem o mesmo balde. Nunca defina um valor maior que o numero real de proxies: `X-Forwarded-For` passa a ser falsificavel.
 - **Storage compartilhado para o throttler, se rodar mais de uma replica.** O default e in-memory por processo: o limite efetivo vira `THROTTLE_LIMIT` x numero de processos e zera a cada restart.
 - **`ANTI_BOT_TOKEN_SECRET` definido, se alguma rota usa `@AntiBot()`.** Sem a variavel a app gera uma chave aleatoria por processo e registra `ERROR` no boot: os form tokens deixam de valer no restart e nao validam entre instancias, entao parte das submissoes legitimas e rejeitada. O registro de tokens usados tambem e in-memory por processo — para uso unico global, ligue um `TOKEN_STORE` compartilhado (ver `src/anti-bot/infrastructure/persistence/token-store.provider.ts`).
-- **`s3:ListBucket` na role/usuario IAM da aplicacao, alem de `s3:PutObject`, `s3:GetObject` e `s3:DeleteObject`.** O check de storage do `GET /api/health` usa `HeadBucketCommand`, que exige `s3:ListBucket` sobre o bucket. Uma politica de menor privilegio so com as tres permissoes de objeto faz o health responder **503 permanente** num deploy perfeitamente saudavel -- os uploads funcionam, o health nao.
+- **`s3:ListBucket` na role/usuario IAM da aplicacao, alem de `s3:PutObject`, `s3:GetObject` e `s3:DeleteObject`.** O check de storage do `GET /api/health` usa `HeadBucketCommand`, que exige `s3:ListBucket` sobre o bucket. Uma politica de menor privilegio so com as tres permissoes de objeto faz a readiness responder **503 permanente** num deploy perfeitamente saudavel -- os uploads funcionam, o health nao.
+- **Sonda de proxy, load balancer e healthcheck de container em `GET /api/health/live`, nunca em `GET /api/health`.** Sao dois endpoints com papeis diferentes: `/api/health/live` (liveness) responde 200 enquanto o processo aceita conexoes e **nao** consulta dependencia externa; `/api/health` (readiness) agrega banco + storage e responde 503 quando alguma falha. Apontar o roteamento para a readiness faz uma dependencia opcional derrubar a aplicacao inteira: o proxy tira o unico upstream do pool e passa a responder **502 em todas as rotas**, inclusive as que nao tocam storage.
 - **Nao deixe `AWS_S3_BUCKET` vazio se a aplicacao usa storage.** Sem a variavel o check de storage e ignorado (`configured: false`) e o health continua 200: e proposital para deploys que nao usam S3, mas nao protege quem esqueceu de configurar.
+
+---
+
+## Deploy em Producao
+
+O template traz uma stack de producao pronta e um workflow de deploy. O passo a passo completo (pre-requisitos na AWS, preparo do servidor, operacao e rollback) esta em **[`infra/README.md`](../infra/README.md)**; aqui fica so o mapa.
+
+### O que existe
+
+| Arquivo                                   | O que e                                                                                      |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `infra/docker-compose.yml`                | Stack de producao: Caddy (TLS automatico) + api + postgres + supertokens em rede interna.    |
+| `infra/Caddyfile.example`                 | Config do Caddy (reverse proxy, headers de seguranca, log JSON). Vai para `infra/Caddyfile`. |
+| `infra/.env.example`                      | Modelo do `.env` do servidor. Preenchido a mao, uma vez, e **nunca** enviado pelo deploy.    |
+| `.github/workflows/deploy.yml`            | Workflow **reusavel** (`workflow_call`) com toda a logica de build e deploy.                 |
+| `.github/workflows/deploy-staging.yml`    | Caller: `push` na `main` (com filtro de paths) ou `workflow_dispatch`.                       |
+| `.github/workflows/deploy-production.yml` | Caller: `release` publicada ou `workflow_dispatch`.                                          |
+
+O `docker-compose.yml` da raiz continua sendo **so de desenvolvimento** (portas expostas, senhas fixas, LocalStack). Os dois arquivos nao se misturam.
+
+> **A instancia nao e descartavel.** O banco de producao vive no volume Docker `infra_pgdata` da propria EC2 (e os certificados em `infra_caddy_data`): recriar a maquina ou rodar `down -v` apaga os dois. Nao ha backup automatico -- veja [`infra/README.md`](../infra/README.md#a-instancia-nao-e-descartavel-estado-em-volume-docker).
+
+### Variaveis por GitHub Environment
+
+Crie um Environment por ambiente (`staging`, `production`) e defina nele estas tres **variables** — nenhum secret e necessario, porque a autenticacao na AWS e por OIDC:
+
+| Variable             | Exemplo                                                  |
+| -------------------- | -------------------------------------------------------- |
+| `AWS_ROLE_ARN`       | `arn:aws:iam::000000000000:role/github-deploy`           |
+| `ECR_REPOSITORY_URL` | `000000000000.dkr.ecr.us-east-1.amazonaws.com/minha-app` |
+| `EC2_INSTANCE_ID`    | `i-0123456789abcdef0`                                    |
+
+A imagem e publicada com a tag **`${{ github.sha }}` e so ela** (sem `:latest`, para o rollback ser deterministico), o deploy chega na instancia por `ssm:SendCommand` (sem SSH) e o workflow **espera o status do comando SSM** antes de se declarar verde. Sem essa espera o job passaria mesmo com o deploy quebrado -- e o motivo pelo qual `ssm:GetCommandInvocation` precisa estar na policy da role.
+
+### Antes do primeiro deploy
+
+O deploy roda `migration:run` na instancia (num container efemero da imagem nova, via `docker compose run --rm --no-deps api`, **antes** de trocar o trafego), mas o template **nao versiona migrations** — veja [5. Criar o Schema do Banco](#5-criar-o-schema-do-banco). Gere e commite a migration inicial antes do primeiro deploy: sem ela o `migration:run` e um no-op e a aplicacao sobe com o banco vazio.

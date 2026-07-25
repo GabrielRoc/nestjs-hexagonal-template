@@ -1,0 +1,259 @@
+# Stack de producao (EC2 + Docker Compose).
+#
+# Diferencas em relacao ao docker-compose.yml da raiz (que e SO para dev):
+#   - somente o Caddy publica portas; o resto vive na rede interna;
+#   - TLS automatico (Let's Encrypt) terminado no Caddy;
+#   - imagens e variaveis obrigatorias declaradas com ${VAR:?mensagem}, para o
+#     compose falhar na hora com um erro legivel em vez de subir com defaults;
+#   - rotacao de log em todos os servicos (ver comentario em `logging` abaixo).
+#
+# Uso:
+#   cd /opt/app
+#   docker compose --env-file .env -f infra/docker-compose.yml up -d --wait
+#
+# Sempre com este mesmo `-f infra/docker-compose.yml` e SEM `-p`: o compose
+# deriva o nome do projeto do diretorio do arquivo, entao o projeto se chama
+# `infra` (containers `infra-api-1`, volumes `infra_pgdata`). Passar `-p` ou
+# `--project-directory` em alguma invocacao cria um SEGUNDO projeto com volumes
+# novos -- o banco "desaparece" sem nada ter sido apagado.
+#
+# O `.env` do servidor vem de infra/.env.example. Veja infra/README.md.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME nao definido (veja infra/.env.example)}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD nao definido (veja infra/.env.example)}
+      POSTGRES_DB: ${DB_DATABASE:?DB_DATABASE nao definido (veja infra/.env.example)}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # O driver de log padrao do Docker e json-file SEM limite: um container
+    # tagarela (ou em crashloop) enche o disco da instancia e derruba a stack
+    # inteira -- inclusive o Postgres, que para de aceitar escrita. Isso ja
+    # aconteceu em producao no projeto de onde esta stack foi extraida; o
+    # max-size/max-file nao e enfeite, e o que limita o estrago.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    networks:
+      - internal
+
+  supertokens:
+    # Tag fixa de proposito: com `latest` o core do SuperTokens troca de versao
+    # em qualquer restart e pode sair do contrato suportado pelo supertokens-node
+    # do package.json. Suba a versao aqui, conscientemente, junto com o SDK.
+    image: registry.supertokens.io/supertokens/supertokens-postgresql:12.0.7
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # DB_PASSWORD entra dentro de uma URI: `@`, `:`, `/`, `?`, `#` ou `%` na
+      # senha mudam o parsing e o core se conecta ao host/base errados (ou nem
+      # sobe). Gere a senha com alfanumericos, ou faca percent-encoding aqui.
+      POSTGRESQL_CONNECTION_URI: postgresql://${DB_USERNAME}:${DB_PASSWORD}@postgres:5432/${DB_DATABASE}
+      # Sem API_KEYS o core aceita qualquer chamada de quem alcancar a porta
+      # 3567 na rede interna. A mesma chave vai em SUPERTOKENS_API_KEY na app.
+      API_KEYS: ${SUPERTOKENS_API_KEY:?SUPERTOKENS_API_KEY nao definido (veja infra/.env.example)}
+    healthcheck:
+      # A imagem nao tem curl; /dev/tcp do bash resolve sem instalar nada.
+      test:
+        [
+          'CMD-SHELL',
+          'bash -c ''exec 3<>/dev/tcp/127.0.0.1/3567 && echo -e "GET /hello HTTP/1.1\r\nhost: 127.0.0.1:3567\r\nConnection: close\r\n\r\n" >&3 && cat <&3 | grep -q "Hello"''',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    networks:
+      - internal
+
+  api:
+    # Tag imutavel (SHA do commit) injetada pelo workflow de deploy. Sem valor
+    # default: subir a stack sem API_IMAGE definido falha aqui, em vez de puxar
+    # uma tag movel qualquer.
+    image: '${API_IMAGE:?API_IMAGE nao definido (ex.: 000000000000.dkr.ecr.us-east-1.amazonaws.com/app:<sha>)}'
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      supertokens:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Numero de proxies na frente da app. Aqui so existe o Caddy => 1.
+      # Valor maior que o numero real de proxies torna X-Forwarded-For
+      # falsificavel e o rate limit por IP, contornavel.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      # ENABLE_SWAGGER fica deliberadamente AUSENTE: as rotas do Swagger sao
+      # registradas fora do pipeline de guards e expoem o contrato inteiro sem
+      # autenticacao.
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS nao definido (veja infra/.env.example)}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE: ${DB_DATABASE}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-20}
+      DATABASE_POOL_IDLE_TIMEOUT: ${DATABASE_POOL_IDLE_TIMEOUT:-30000}
+      SUPERTOKENS_CONNECTION_URI: http://supertokens:3567
+      SUPERTOKENS_API_KEY: ${SUPERTOKENS_API_KEY}
+      SUPERTOKENS_APP_NAME: ${SUPERTOKENS_APP_NAME:-MyApp}
+      # Os nomes sao SUPERTOKENS_API_DOMAIN / SUPERTOKENS_WEBSITE_DOMAIN, e nao
+      # API_DOMAIN / WEBSITE_DOMAIN: src/config/supertokens.config.ts so le os
+      # primeiros. Com os nomes errados a app cai nos defaults de localhost e o
+      # cookie de sessao sai com dominio errado -- em producao, silenciosamente.
+      SUPERTOKENS_API_DOMAIN: '${SUPERTOKENS_API_DOMAIN:?SUPERTOKENS_API_DOMAIN nao definido (ex.: https://api.exemplo.com.br)}'
+      SUPERTOKENS_WEBSITE_DOMAIN: '${SUPERTOKENS_WEBSITE_DOMAIN:?SUPERTOKENS_WEBSITE_DOMAIN nao definido (ex.: https://app.exemplo.com.br)}'
+      SUPERADMIN_SUPERTOKENS_IDS: ${SUPERADMIN_SUPERTOKENS_IDS:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+      # Vazio = S3 real. So aponte para outro endpoint em ambiente com
+      # LocalStack/MinIO.
+      AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
+      SIGNED_URL_EXPIRY_SECONDS: ${SIGNED_URL_EXPIRY_SECONDS:-900}
+      # Sem AWS_ACCESS_KEY_ID/SECRET aqui: o SDK usa a role da instancia via
+      # IMDS. De dentro do container o IMDSv2 exige hop limit 2 na EC2
+      # (`aws ec2 modify-instance-metadata-options --http-put-response-hop-limit 2`),
+      # senao o health de storage responde 503 num deploy saudavel.
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      THROTTLE_TTL: ${THROTTLE_TTL:-60000}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-app-api}
+    healthcheck:
+      # A imagem de runtime e node:24-slim e NAO tem curl nem wget; o fetch
+      # global do Node 24 evita instalar pacote so para o healthcheck.
+      #
+      # A sonda e /api/health/live (liveness) de proposito, NAO /api/health
+      # (readiness). Aqui "healthy" precisa significar "o processo aceita
+      # conexoes", porque este healthcheck e o gate de `up -d --wait` no deploy:
+      # com o endpoint agregado, um HeadBucket lento (ou a role sem
+      # `s3:ListBucket`) responde 503, o container nunca fica healthy e o deploy
+      # de um codigo que nem toca storage e reprovado -- com a app funcionando.
+      # A readiness continua em /api/health, para uso humano e monitoramento.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/health/live').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # O container roda como USER node (uid 1000) e nao escreve em /app: nenhum
+    # volume e montado aqui de proposito. Bind mount de host criado pelo daemon
+    # nasce root:root e o processo nao conseguiria escrever nele.
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '5'
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # `service_started`, e NAO `service_healthy`: a borda tem de subir mesmo com
+    # a app degradada. Com `service_healthy` o compose so cria este container
+    # depois de `api` ficar healthy -- se ela nao fica (banco fora, migration
+    # travada, qualquer problema na app), o `up` aborta com "dependency failed to
+    # start" e o Caddy nunca e criado: nada escutando em 80/443, nenhum desafio
+    # ACME, certificado nao emitido e/ou nao renovado. Uma app com problema viraria
+    # um dominio inteiro fora do ar mais um risco de rate limit do Let's Encrypt.
+    # O custo de `service_started` e um 502 nos primeiros segundos de uma subida
+    # limpa; o `health_uri` do reverse_proxy (Caddyfile) absorve a `api` oscilando.
+    depends_on:
+      api:
+        condition: service_started
+    # Unico servico com portas publicadas. TLS automatico via Let's Encrypt
+    # (ACME HTTP-01 na 80, trafego na 443): a 80 precisa continuar aberta no
+    # security group, senao a renovacao do certificado falha em silencio.
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      CADDY_DOMAIN: '${CADDY_DOMAIN:?CADDY_DOMAIN nao definido (ex.: api.exemplo.com.br)}'
+      CADDY_ACME_EMAIL: "${CADDY_ACME_EMAIL:?CADDY_ACME_EMAIL nao definido - e-mail da conta ACME do Let's Encrypt}"
+    volumes:
+      # O workflow de deploy escreve este arquivo a partir de Caddyfile.example.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # caddy_data guarda os certificados: perder este volume = reemissao e
+      # risco de bater no rate limit do Let's Encrypt.
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    networks:
+      - internal
+
+# Redis: o template nao usa Redis (nao ha client no package.json e o
+# ThrottlerModule usa o storage in-memory padrao). O bloco abaixo fica
+# comentado como ponto de partida para quando existir cache/fila/rate limit
+# compartilhado -- com a configuracao de cache/broker ja aplicada:
+# maxmemory + allkeys-lru para o Redis despejar chave velha em vez de comecar
+# a responder OOM, e save ""/stop-writes-on-bgsave-error no para nao travar
+# escrita por causa de um snapshot que nem queremos.
+#
+#  redis:
+#    image: redis:7-alpine
+#    restart: unless-stopped
+#    command: >
+#      redis-server
+#      --maxmemory 256mb
+#      --maxmemory-policy allkeys-lru
+#      --stop-writes-on-bgsave-error no
+#      --save ""
+#    healthcheck:
+#      test: ['CMD', 'redis-cli', 'ping']
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#    logging:
+#      driver: json-file
+#      options:
+#        max-size: '10m'
+#        max-file: '3'
+#    networks:
+#      - internal
+#
+# Ao habilitar, adicione tambem em `api`:
+#    depends_on:
+#      redis:
+#        condition: service_healthy
+#    environment:
+#      REDIS_HOST: redis
+#      REDIS_PORT: 6379
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge

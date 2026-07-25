@@ -1,0 +1,35 @@
+name: Deploy production
+
+# Caller: so o gatilho e o ambiente. A logica esta em deploy.yml.
+#
+# Producao NAO sai em push para main -- sai em release publicada, para o deploy
+# ter um artefato versionado e uma acao humana explicita por tras. Combine com
+# required reviewers no Environment `production`.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Precisa repetir o bloco do workflow chamado: as permissoes do caller sao o
+# teto do que o reusavel recebe.
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  # Um deploy por vez neste ambiente. `cancel-in-progress: false` de proposito:
+  # cancelar no meio de um `docker compose up`/`migration:run` deixa a stack em
+  # estado desconhecido.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+    # Sem `secrets: inherit`: `inherit` entrega ao workflow chamado TODOS os
+    # secrets de repositorio/organizacao/Environment, e o deploy.yml nao usa
+    # nenhum (autenticacao e OIDC + `vars.*`, que resolvem pelo `environment:`
+    # do job reusavel). Quando algum for necessario, declare `secrets:` nomeado
+    # no `workflow_call` e passe so ele.

@@ -134,10 +134,12 @@ src/
 
 ## Documentation
 
-| Document                                | Description                            |
-| --------------------------------------- | -------------------------------------- |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Detailed architecture explanation      |
-| [CLAUDE.md](CLAUDE.md)                  | AI agent guide and project conventions |
+| Document                                | Description                                    |
+| --------------------------------------- | ---------------------------------------------- |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Detailed architecture explanation              |
+| [SETUP.md](docs/SETUP.md)               | Local setup, troubleshooting and deploy map    |
+| [infra/README.md](infra/README.md)      | Production stack and deploy workflow (AWS/ECR) |
+| [CLAUDE.md](CLAUDE.md)                  | AI agent guide and project conventions         |
 
 ---
 
@@ -152,6 +154,7 @@ After cloning this template for a new project, complete the following steps:
 - [ ] Add project-specific error codes
 - [ ] Remove or rename the `sample` module
 - [ ] Update database name in `docker-compose.yml`
+- [ ] Set the deploy variables per GitHub Environment (see [infra/README.md](infra/README.md))
 - [ ] Personalize `CLAUDE.md` with project context
 - [ ] Remove this checklist
 
