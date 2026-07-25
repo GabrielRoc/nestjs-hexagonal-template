@@ -305,7 +305,6 @@ graph TB
         subgraph Middleware
             HELMET[Helmet]
             CORS[CORS]
-            THROTTLE[Rate Limiter]
             TENANT_MW[TenantContextMiddleware]
         end
 
@@ -313,6 +312,7 @@ graph TB
             AUTH_G[SuperTokensAuthGuard]
             ROLE_G[RolesGuard]
             TENANT_G[TenantGuard]
+            THROTTLE[ThrottlerGuard]
         end
 
         subgraph Modules
@@ -351,12 +351,12 @@ graph TB
 
     WEB --> HELMET
     MOB --> HELMET
-    HELMET --> CORS --> THROTTLE --> TENANT_MW
-    TENANT_MW --> AUTH_G --> ROLE_G --> TENANT_G
+    HELMET --> CORS --> TENANT_MW
+    TENANT_MW --> AUTH_G --> ROLE_G --> TENANT_G --> THROTTLE
 
-    TENANT_G --> S_CTRL
-    TENANT_G --> T_CTRL
-    TENANT_G --> U_CTRL
+    THROTTLE --> S_CTRL
+    THROTTLE --> T_CTRL
+    THROTTLE --> U_CTRL
 
     S_CTRL --> S_UC --> S_PORT
     S_PORT -.-> S_REPO --> PG
@@ -370,6 +370,11 @@ graph TB
     AUTH_G -.-> ST
     S3 -.-> S3
 ```
+
+> **Rate limiting nao e middleware.** O `ThrottlerGuard` e registrado como `APP_GUARD` em `src/app.module.ts`, depois dos guards de auth/roles/tenant. Duas consequencias praticas:
+>
+> - As rotas de `/api/auth/*` **nao passam por ele**. Elas sao atendidas pelo middleware Express do `supertokens-nestjs`, que responde sem chamar `next()`, entao nenhum `APP_GUARD` roda. Proteger login e signup contra forca bruta exige rate limit por IP no proxy/WAF.
+> - O storage padrao do throttler e **in-memory por processo**: com N replicas o limite efetivo e N x `THROTTLE_LIMIT`, e ele zera a cada restart.
 
 ---
 

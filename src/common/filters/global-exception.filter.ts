@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DomainException } from '../exceptions/domain.exception';
+import { ErrorCode } from '../enums/error-codes.enum';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -38,22 +39,65 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         exceptionResponse !== null
       ) {
         const resp = exceptionResponse as Record<string, unknown>;
-        message = (resp.message as string) || exception.message;
+        const hasExplicitCode = typeof resp.code === 'string';
+        // Preserva o code customizado (ex.: VALIDATION_ERROR do ZodValidationPipe)
+        if (hasExplicitCode) {
+          code = resp.code as string;
+        }
+        // Preserva os details em qualquer formato, como faz a DomainException
+        const hasExplicitDetails = resp.details !== undefined;
+        if (hasExplicitDetails) {
+          details = resp.details;
+        }
         if (Array.isArray(resp.message)) {
+          // Array de message e uma falha de validacao nativa do Nest
+          if (!hasExplicitCode) {
+            code = ErrorCode.VALIDATION_ERROR;
+          }
           message = 'Erro de validação';
-          details = resp.message;
+          // So deriva details do array de message quando nao veio details explicito
+          if (!hasExplicitDetails) {
+            details = resp.message;
+          }
+        } else {
+          // message precisa ser sempre string para nao quebrar o contrato da API
+          message =
+            typeof resp.message === 'string' ? resp.message : exception.message;
         }
       } else {
         message = exception.message;
       }
     } else {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
-      code = 'INTERNAL_ERROR';
+      code = ErrorCode.INTERNAL_ERROR;
       message = 'Erro interno do servidor';
       this.logger.error(
         'Unhandled exception',
         exception instanceof Error ? exception.stack : String(exception),
       );
+    }
+
+    // Erros 5xx nunca podem vazar a mensagem original para o cliente: ela pode
+    // conter credenciais ou detalhes de infraestrutura. Registra no servidor e
+    // devolve a mensagem generica, como no ramo de excecao desconhecida.
+    // Mensagens 4xx continuam passando intactas, pois sao para quem chamou.
+    const isServerError = status >= 500;
+    if (isServerError) {
+      // details pode conter DSN, host interno, query com credencial. Fica fora
+      // do instanceof de proposito: qualquer caminho futuro que produza 5xx
+      // com details herda o mascaramento.
+      details = undefined;
+    }
+    if (
+      isServerError &&
+      (exception instanceof HttpException ||
+        exception instanceof DomainException)
+    ) {
+      this.logger.error(
+        `${exception.name} ${status}: ${exception.message}`,
+        exception.stack,
+      );
+      message = 'Erro interno do servidor';
     }
 
     response.status(status).json({

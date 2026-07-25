@@ -398,10 +398,12 @@ app.use(helmet());
 
 ### CORS
 
-Configurado via variavel de ambiente `CORS_ORIGINS` (lista separada por virgula):
+Configurado via variavel de ambiente `CORS_ORIGINS` (lista separada por virgula). O parsing (com `trim`) fica em `src/config/app.config.ts` e o `main.ts` consome a lista pelo `ConfigService`:
 
 ```typescript
-const corsOrigins = process.env.CORS_ORIGINS.split(',');
+const corsOrigins = app
+  .get(ConfigService)
+  .get<string[]>('app.corsOrigins', ['http://localhost:3001']);
 app.enableCors({ origin: corsOrigins, credentials: true });
 ```
 
@@ -413,6 +415,13 @@ Implementado com `@nestjs/throttler`, configurado via variaveis de ambiente:
 THROTTLE_TTL=60000    # Janela de tempo em ms
 THROTTLE_LIMIT=100    # Maximo de requisicoes por janela
 ```
+
+Duas limitacoes que precisam ser conhecidas antes de contar com ele em producao:
+
+- O `ThrottlerGuard` e um `APP_GUARD` e **nao cobre `/api/auth/*`**. Essas rotas sao atendidas pelo middleware Express do `supertokens-nestjs`, que responde sem chamar `next()`: nenhum guard da aplicacao chega a rodar. Login e signup precisam de rate limit por IP no proxy/WAF.
+- O storage padrao e **in-memory por processo**. Com varias replicas o limite efetivo e multiplicado pelo numero de processos e o contador zera a cada restart; um limite global exige um storage compartilhado (Redis).
+
+A chave do balde e `req.ip`. Atras de proxy, defina `TRUST_PROXY_HOPS` (ver `.env.example`), senao todos os clientes compartilham o mesmo balde.
 
 ### URLs Assinadas (S3)
 

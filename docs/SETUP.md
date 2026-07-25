@@ -48,7 +48,8 @@ O arquivo `.env.example` contem todas as variaveis necessarias com valores padra
 # Application
 NODE_ENV=development
 PORT=3000
-CORS_ORIGINS=http://localhost:3001
+CORS_ORIGINS=http://localhost:3001,http://localhost:3002
+TRUST_PROXY_HOPS=0
 
 # Database
 DB_HOST=localhost
@@ -118,15 +119,18 @@ Aguarde ate que todos os servicos estejam com status `healthy` ou `running`.
 
 ---
 
-## 5. Executar Migrations
+## 5. Criar o Schema do Banco
 
-Com o PostgreSQL rodando, execute as migrations para criar as tabelas:
+O template **nao versiona migrations**: as 4 entidades ORM (samples, users, tenants, audit_logs) nao tem DDL commitado e `synchronize` e `false` de proposito. Com o PostgreSQL rodando, gere a migration inicial e execute-a:
 
 ```bash
+npm run migration:generate -- src/database/migrations/InitialSchema
 npm run migration:run
 ```
 
-Este comando compila o projeto e executa todas as migrations pendentes.
+Os dois comandos compilam o projeto antes de chamar o CLI do TypeORM. `migration:run` executa todas as migrations pendentes.
+
+Sem esse passo a aplicacao sobe normalmente, mas a primeira query falha com `relation "..." does not exist` -- e nas rotas autenticadas o erro chega ao cliente como um 403 opaco, nao como erro de banco.
 
 ---
 
@@ -166,23 +170,34 @@ A interface Swagger permite:
 
 ### Via SuperTokens Dashboard
 
-1. Acesse o dashboard do SuperTokens:
+1. Com o servidor da aplicacao rodando (`npm run start:dev`), acesse:
 
 ```
-http://localhost:3567/auth/dashboard
+http://localhost:3000/api/auth/dashboard
 ```
 
-2. Crie um novo usuario com email e senha
+> O dashboard e servido pelo **backend da aplicacao** (`apiDomain` + `apiBasePath`, definidos em `src/config/supertokens.config.ts` e `src/auth/auth.module.ts`). A porta 3567 e apenas o core do SuperTokens (`SUPERTOKENS_CONNECTION_URI`) e nao serve o dashboard.
 
-3. Copie o **User ID** gerado pelo SuperTokens
+2. Na primeira vez, crie o usuario do dashboard direto no core (necessario porque `SUPERTOKENS_API_KEY` e vazio por padrao e o dashboard cai no modo email/senha):
 
-4. (Opcional) Para tornar este usuario superadmin, adicione o ID na variavel `SUPERADMIN_SUPERTOKENS_IDS` no `.env`:
+```bash
+curl -X POST http://localhost:3567/recipe/dashboard/user \
+  -H 'Content-Type: application/json' \
+  -H 'rid: dashboard' \
+  -d '{"email":"admin@example.com","password":"SUA_SENHA_FORTE"}'
+```
+
+3. Faca login no dashboard e crie um novo usuario da aplicacao com email e senha
+
+4. Copie o **User ID** gerado pelo SuperTokens
+
+5. (Opcional) Para tornar este usuario superadmin, adicione o ID na variavel `SUPERADMIN_SUPERTOKENS_IDS` no `.env`:
 
 ```env
 SUPERADMIN_SUPERTOKENS_IDS=<user-id-copiado>
 ```
 
-5. Reinicie o servidor para aplicar as alteracoes
+6. Reinicie o servidor para aplicar as alteracoes
 
 ### Via API
 
@@ -302,3 +317,13 @@ Em ambientes WSL2 ou com volumes Docker, o file watching pode falhar. Tente:
 # Usar polling ao inves de inotify
 npm run start:dev -- --watchAll
 ```
+
+---
+
+## Pre-requisitos de Producao
+
+Itens que o template nao resolve sozinho e precisam existir no ambiente de deploy:
+
+- **Rate limit por IP em `/api/auth/*` no proxy ou WAF.** O `ThrottlerGuard` e um `APP_GUARD` e essas rotas nunca chegam aos guards: o middleware Express do `supertokens-nestjs` responde sem chamar `next()`. Sem limite no proxy, login e signup ficam sem protecao contra forca bruta.
+- **`TRUST_PROXY_HOPS` igual ao numero de proxies na frente da app.** Sem isso o throttler usa o IP do balanceador e todos os clientes dividem o mesmo balde. Nunca defina um valor maior que o numero real de proxies: `X-Forwarded-For` passa a ser falsificavel.
+- **Storage compartilhado para o throttler, se rodar mais de uma replica.** O default e in-memory por processo: o limite efetivo vira `THROTTLE_LIMIT` x numero de processos e zera a cada restart.

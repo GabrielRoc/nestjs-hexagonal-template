@@ -30,7 +30,13 @@ import Dashboard from 'supertokens-node/recipe/dashboard';
             apiBasePath: '/api/auth',
             websiteBasePath: '/auth',
           },
-          recipeList: [EmailPassword.init(), Session.init(), Dashboard.init()],
+          recipeList: [
+            EmailPassword.init(),
+            // O SDK deriva cookieSameSite, cookieSecure e antiCsrf a partir de
+            // apiDomain/websiteDomain; nao sobrescreva sem necessidade real.
+            Session.init(),
+            Dashboard.init(),
+          ],
         };
       },
     }),

@@ -16,7 +16,8 @@ export class S3StorageAdapter implements StorageServicePort {
   private readonly defaultExpirySeconds: number;
 
   constructor(private readonly configService: ConfigService) {
-    const endpoint = this.configService.get<string>('AWS_S3_ENDPOINT');
+    const endpoint =
+      this.configService.get<string>('AWS_S3_ENDPOINT')?.trim() || undefined;
     const region = this.configService.get<string>('AWS_REGION') ?? 'us-east-1';
 
     this.client = new S3Client({
