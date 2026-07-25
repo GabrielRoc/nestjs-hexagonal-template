@@ -50,18 +50,18 @@ modulo/
 
 ## Convencoes Obrigatorias
 
-| Aspecto         | Regra                                                                 |
-| --------------- | --------------------------------------------------------------------- |
-| Idioma codigo   | Ingles para codigo, portugues para mensagens de usuario               |
-| Rotas           | kebab-case, plural (`/api/v1/audit-logs`)                             |
-| IDs             | UUID v4                                                               |
-| Datas           | ISO 8601 (`2024-01-15T10:30:00Z`)                                     |
-| Moeda           | Inteiro em centavos (`1999` = R$ 19,99)                               |
-| Soft delete     | Campo `deletedAt` (nullable timestamp), nunca DELETE fisico           |
-| Respostas       | Envelope `{ data, meta? }` para listas; objeto direto para item unico |
-| Codigos de erro | Enum centralizado em `common/exceptions/`                             |
-| Multi-tenancy   | Todo recurso possui `tenantId`; filtrar sempre nas queries            |
-| Controllers     | Apenas validam entrada (Zod) e delegam ao use case                    |
+| Aspecto         | Regra                                                               |
+| --------------- | ------------------------------------------------------------------- |
+| Idioma codigo   | Ingles para codigo, portugues para mensagens de usuario             |
+| Rotas           | kebab-case, plural (`/api/v1/audit-logs`)                           |
+| IDs             | UUID v4                                                             |
+| Datas           | ISO 8601 (`2024-01-15T10:30:00Z`)                                   |
+| Moeda           | Inteiro em centavos (`1999` = R$ 19,99)                             |
+| Soft delete     | Campo `deletedAt` (nullable timestamp), nunca DELETE fisico         |
+| Respostas       | Envelope `{ data }` sempre; `{ data, meta.pagination }` para listas |
+| Codigos de erro | Enum centralizado em `src/common/enums/error-codes.enum.ts`         |
+| Multi-tenancy   | Todo recurso possui `tenantId`; filtrar sempre nas queries          |
+| Controllers     | Apenas validam entrada (Zod) e delegam ao use case                  |
 
 ---
 
