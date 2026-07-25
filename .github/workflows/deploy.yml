@@ -142,13 +142,37 @@ jobs:
                 "printf %s \"$CADDY_B64\" | base64 -d > \"$DIR/infra/Caddyfile\"",
                 "cd \"$DIR\"",
                 "sed -i \"/^API_IMAGE=/d\" .env",
+                # Um .env sem newline final (heredoc com printf, scp de outro
+                # editor) faria o append concatenar com a ultima variavel:
+                # `LOG_LEVEL=infoAPI_IMAGE=...`. API_IMAGE deixaria de existir e
+                # LOG_LEVEL ficaria corrompido de forma permanente (o sed acima
+                # nao casa mais com a linha grudada). Sem apostrofo nesta linha
+                # (nem nos comentarios): o programa jq inteiro esta entre aspas
+                # simples no shell do runner, e um apostrofo fecharia a string
+                # antes da hora -- o proprio jq passaria a receber outro texto.
+                "if [ -s .env ] && [ -n \"$(tail -c1 .env)\" ]; then printf \"\\n\" >> .env; fi",
                 "printf \"API_IMAGE=%s\\n\" \"$IMAGE\" >> .env",
                 "COMPOSE=\"docker compose --env-file .env -f infra/docker-compose.yml\"",
                 "aws ecr get-login-password --region \"$REGION\" | docker login --username AWS --password-stdin \"$REGISTRY\"",
                 "$COMPOSE pull api",
+                # Migrations ANTES de trocar o trafego, num container efemero da
+                # imagem nova (`run --rm`, sem nome de container fixo). Rodar
+                # depois do `up` deixava uma janela em que o codigo novo ja
+                # atendia sobre o schema antigo (500 em qualquer rota que use uma
+                # coluna nova) e, se o `up --wait` estourasse o timeout, o
+                # `set -eu` abortava o script e as migrations NUNCA rodavam --
+                # com o codigo novo no ar. Falha aqui aborta o deploy com a stack
+                # antiga intacta.
+                "$COMPOSE up -d --wait --wait-timeout 120 postgres",
+                "$COMPOSE run --rm --no-deps -T api node_modules/.bin/typeorm migration:run -d dist/database/typeorm-cli.config.js",
                 "$COMPOSE up -d --wait --wait-timeout 480 --remove-orphans",
-                "$COMPOSE exec -T api node_modules/.bin/typeorm migration:run -d dist/database/typeorm-cli.config.js",
-                "docker image prune -f",
+                # `prune` sem `-a` so remove imagem dangling, e a imagem do deploy
+                # anterior continua TAGUEADA (<repo>:<sha>): nao recuperava nada e
+                # o disco crescia a cada deploy ate `no space left on device`
+                # (mesmo volume do Postgres). Com `-a` + `until` as imagens em uso
+                # pelos containers em execucao e as da ultima semana ficam --
+                # preservando o rollback descrito no infra/README.md.
+                "docker image prune -af --filter until=168h",
                 "$COMPOSE ps"
               ]
             }' > "$RUNNER_TEMP/ssm-params.json"
@@ -180,12 +204,14 @@ jobs:
           # StandardOutputContent/StandardErrorContent vem truncado em 2500
           # caracteres. Para o log completo configure output em S3/CloudWatch no
           # send-command; aqui o objetivo e so ter o erro na tela do job.
+          # `2>&1` para o erro da AWS aparecer no log em vez de o `|| true`
+          # engolir a unica pista disponivel.
           dump_output() {
             aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "$EC2_INSTANCE_ID" \
               --query '[StandardOutputContent, StandardErrorContent]' \
-              --output text || true
+              --output text 2>&1 || true
           }
 
           deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
@@ -193,12 +219,27 @@ jobs:
           while :; do
             # Nos primeiros segundos a invocacao ainda nao existe e a chamada
             # falha com InvocationDoesNotExist: isso e "ainda nao comecou", nao
-            # erro de deploy.
-            status="$(aws ssm get-command-invocation \
+            # erro de deploy. Qualquer OUTRO erro (AccessDeniedException por falta
+            # de ssm:GetCommandInvocation na role, instance-id ou regiao errados,
+            # credencial expirada) e permanente e falha na hora: tratar tudo como
+            # "Pending" gastava os 900 s do loop e reportava "timeout" -- enquanto
+            # o deploy podia ter concluido com sucesso na instancia. Por isso
+            # stderr e capturado (2>&1) em vez de descartado.
+            if ! status="$(aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "$EC2_INSTANCE_ID" \
               --query Status \
-              --output text 2>/dev/null || echo Pending)"
+              --output text 2>&1)"; then
+              case "$status" in
+                *InvocationDoesNotExist*)
+                  status=Pending
+                  ;;
+                *)
+                  echo "::error::Falha ao consultar o comando SSM: $status"
+                  exit 1
+                  ;;
+              esac
+            fi
 
             echo "status=$status"
 

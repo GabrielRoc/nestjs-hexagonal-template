@@ -33,6 +33,8 @@ jobs:
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging
-    # `vars` do Environment resolvem pelo `environment:` do job reusavel; o
-    # inherit cobre os secrets, caso o deploy passe a precisar de algum.
-    secrets: inherit
+    # Sem `secrets: inherit`: `inherit` entrega ao workflow chamado TODOS os
+    # secrets de repositorio/organizacao/Environment, e o deploy.yml nao usa
+    # nenhum (autenticacao e OIDC + `vars.*`, que resolvem pelo `environment:`
+    # do job reusavel). Quando algum for necessario, declare `secrets:` nomeado
+    # no `workflow_call` e passe so ele.
