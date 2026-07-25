@@ -105,7 +105,7 @@ src/
 
 - **Runtime:** Node.js 24 (22.13+ LTS also supported) + TypeScript 5
 - **Framework:** NestJS 11
-- **ORM:** TypeORM 0.3
+- **ORM:** TypeORM 1.1
 - **Database:** PostgreSQL 16
 - **Authentication:** SuperTokens
 - **Validation:** Zod 4
