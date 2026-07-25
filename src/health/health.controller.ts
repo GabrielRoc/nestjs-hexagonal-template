@@ -6,6 +6,7 @@ import {
 } from '@nestjs/terminus';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Public } from '../common/decorators';
+import { RedisHealthIndicator } from './redis.health-indicator';
 import { S3HealthIndicator } from './s3.health-indicator';
 
 @ApiTags('Health')
@@ -15,6 +16,7 @@ export class HealthController {
     private health: HealthCheckService,
     private db: TypeOrmHealthIndicator,
     private s3: S3HealthIndicator,
+    private redis: RedisHealthIndicator,
   ) {}
 
   @Get()
@@ -25,6 +27,7 @@ export class HealthController {
     return this.health.check([
       () => this.db.pingCheck('database'),
       () => this.s3.isHealthy('storage'),
+      () => this.redis.isHealthy('redis'),
     ]);
   }
 }

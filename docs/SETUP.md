@@ -59,6 +59,11 @@ DB_USERNAME=postgres
 DB_PASSWORD=postgres
 DB_DATABASE=template_db
 
+# Redis (BullMQ)
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+
 # SuperTokens
 SUPERTOKENS_CONNECTION_URI=http://localhost:3567
 SUPERTOKENS_API_KEY=
@@ -113,11 +118,12 @@ docker compose up -d
 
 Isso ira iniciar:
 
-| Servico           | Porta | Descricao                |
-| ----------------- | ----- | ------------------------ |
-| **PostgreSQL 16** | 5432  | Banco de dados principal |
-| **SuperTokens**   | 3567  | Servico de autenticacao  |
-| **LocalStack**    | 4566  | Emulador AWS S3 local    |
+| Servico           | Porta | Descricao                 |
+| ----------------- | ----- | ------------------------- |
+| **PostgreSQL 16** | 5432  | Banco de dados principal  |
+| **SuperTokens**   | 3567  | Servico de autenticacao   |
+| **Redis 7**       | 6379  | Broker das filas (BullMQ) |
+| **LocalStack**    | 4566  | Emulador AWS S3 local     |
 
 Verifique se todos os containers estao rodando:
 

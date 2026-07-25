@@ -11,16 +11,19 @@ import {
   Query,
   UsePipes,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Roles, TenantId } from '../../../common/decorators';
 import { Role } from '../../../common/enums/role.enum';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
+import { ErrorResponseSwagger } from '../../../common/swagger/common.swagger';
 import {
   createSampleSchema,
+  scheduleSampleDeactivationSchema,
   updateSampleSchema,
 } from '../../application/dtos/sample.dto';
 import type {
   CreateSampleDto,
+  ScheduleSampleDeactivationDto,
   UpdateSampleDto,
 } from '../../application/dtos/sample.dto';
 import { CreateSampleUseCase } from '../../application/use-cases/create-sample.use-case';
@@ -28,6 +31,7 @@ import { GetSampleUseCase } from '../../application/use-cases/get-sample.use-cas
 import { ListSamplesUseCase } from '../../application/use-cases/list-samples.use-case';
 import { UpdateSampleUseCase } from '../../application/use-cases/update-sample.use-case';
 import { DeleteSampleUseCase } from '../../application/use-cases/delete-sample.use-case';
+import { ScheduleSampleDeactivationUseCase } from '../../application/use-cases/schedule-sample-deactivation.use-case';
 
 @ApiTags('Samples')
 @Controller('v1/samples')
@@ -39,6 +43,7 @@ export class SampleController {
     private readonly listSamplesUseCase: ListSamplesUseCase,
     private readonly updateSampleUseCase: UpdateSampleUseCase,
     private readonly deleteSampleUseCase: DeleteSampleUseCase,
+    private readonly scheduleSampleDeactivationUseCase: ScheduleSampleDeactivationUseCase,
   ) {}
 
   @Post()
@@ -83,5 +88,37 @@ export class SampleController {
   @ApiOperation({ summary: 'Soft delete a sample' })
   async remove(@Param('id') id: string, @TenantId() tenantId: string) {
     await this.deleteSampleUseCase.execute(id, tenantId);
+  }
+
+  // Exemplo de rota que apenas enfileira trabalho: responde 202 assim que o job
+  // entra no Redis, sem esperar a execucao. 202 (e nao 200/201) porque o efeito
+  // pedido ainda nao aconteceu quando a resposta sai.
+  @Post(':id/deactivations')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Schedule sample deactivation (background job)' })
+  @ApiResponse({ status: 202, description: 'Job de desativacao enfileirado' })
+  @ApiResponse({
+    status: 404,
+    description: 'Sample nao encontrado',
+    type: ErrorResponseSwagger,
+  })
+  @ApiResponse({
+    status: 503,
+    description:
+      'Fila indisponivel (QUEUE_UNAVAILABLE): o job nao foi enfileirado e o cliente pode repetir a chamada',
+    type: ErrorResponseSwagger,
+  })
+  async scheduleDeactivation(
+    @Param('id') id: string,
+    @TenantId() tenantId: string,
+    @Body(new ZodValidationPipe(scheduleSampleDeactivationSchema))
+    dto: ScheduleSampleDeactivationDto,
+  ) {
+    await this.scheduleSampleDeactivationUseCase.execute(
+      id,
+      tenantId,
+      dto.delayMs,
+    );
+    return { data: { scheduled: true } };
   }
 }

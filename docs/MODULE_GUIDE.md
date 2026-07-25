@@ -34,6 +34,10 @@ src/meu-modulo/
     persistence/
       meu-modulo.typeorm-entity.ts
       meu-modulo.typeorm-repository.ts
+    queue/                               (opcional -- ver Passo 15)
+      meu-modulo-queue.constants.ts
+      meu-modulo-queue.adapter.ts
+      meu-modulo.processor.ts
     meu-modulo.module.ts
 ```
 
@@ -894,6 +898,229 @@ describe('SampleDomainService', () => {
 
 ---
 
+## Passo 15: Filas (Opcional)
+
+Use uma fila quando o trabalho nao precisa terminar dentro do request: envio de
+notificacao, chamada de API externa lenta, processamento agendado. A conexao
+Redis ja existe (`src/queue/queue.module.ts`, global) — o modulo so declara a
+propria fila. Referencia completa e funcionando: `src/sample/`.
+
+### 15.1 Port de fila (`domain/ports/`)
+
+A camada de aplicacao depende da interface, nunca do BullMQ.
+
+```typescript
+// src/sample/domain/ports/sample-queue.port.ts
+export const SAMPLE_QUEUE = Symbol('SAMPLE_QUEUE');
+
+// Somente identificadores: o payload e serializado em JSON e fica parado no
+// Redis. Um snapshot da entidade chega desatualizado no worker e ainda joga
+// dado de negocio/PII para dentro do Redis.
+export interface DeactivateSampleJobData {
+  sampleId: string;
+  tenantId: string;
+}
+
+export interface SampleQueuePort {
+  enqueueDeactivation(
+    data: DeactivateSampleJobData,
+    delayMs?: number,
+  ): Promise<void>;
+}
+```
+
+### 15.2 Constantes (`infrastructure/queue/`)
+
+O nome da fila e usado em tres lugares (`registerQueue`, `@InjectQueue`,
+`@Processor`) e por isso mora em um arquivo so.
+
+```typescript
+// src/sample/infrastructure/queue/sample-queue.constants.ts
+export const SAMPLE_QUEUE_NAME = 'sample';
+export const SAMPLE_DEACTIVATE_JOB = 'deactivate-sample';
+```
+
+### 15.3 Adapter — produtor (`infrastructure/queue/`)
+
+A politica de retry fica em uma constante unica. Espalhar `attempts`/`backoff`
+por cada `add()` faz cada job ganhar uma politica diferente sem ninguem notar.
+
+```typescript
+// src/sample/infrastructure/queue/sample-queue.adapter.ts
+const SAMPLE_JOB_OPTIONS: JobsOptions = {
+  attempts: 3,
+  // Espera = 2^(tentativa-1) * delay -> 30s e 60s. `attempts: 3` da 2
+  // reagendamentos (a 3a execucao e a ultima), nao 3.
+  backoff: { type: 'exponential', delay: 30000 },
+  removeOnComplete: 100, // sem limite o Redis guarda todo job para sempre
+  removeOnFail: 1000,
+};
+
+// OBRIGATORIO: `add()` roda no request e o BullMQ espera a conexao ficar pronta
+// antes de escrever. Com o Redis fora do ar essa espera nao termina (o
+// retryStrategy do BullMQ reconecta para sempre), e sem timeout a resposta HTTP
+// nunca sai.
+const ENQUEUE_TIMEOUT_MS = 3000;
+
+@Injectable()
+export class SampleQueueAdapter implements SampleQueuePort {
+  private readonly logger = new Logger(SampleQueueAdapter.name);
+
+  constructor(
+    @InjectQueue(SAMPLE_QUEUE_NAME)
+    private readonly queue: Queue<DeactivateSampleJobData>,
+  ) {}
+
+  async enqueueDeactivation(
+    data: DeactivateSampleJobData,
+    delayMs = 0,
+  ): Promise<void> {
+    try {
+      await this.withTimeout(
+        this.queue.add(SAMPLE_DEACTIVATE_JOB, data, {
+          ...SAMPLE_JOB_OPTIONS,
+          delay: delayMs,
+        }),
+      );
+    } catch (error) {
+      this.logger.error(/* detalhe da infra fica so no log */);
+      throw new DomainException(
+        ErrorCode.QUEUE_UNAVAILABLE,
+        'Nao foi possivel agendar a operacao. Tente novamente.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+}
+```
+
+### 15.4 Processor — consumidor (`infrastructure/queue/`)
+
+```typescript
+// src/sample/infrastructure/queue/sample.processor.ts
+@Processor(SAMPLE_QUEUE_NAME)
+export class SampleProcessor extends WorkerHost {
+  constructor(
+    @Inject(SAMPLE_REPOSITORY)
+    private readonly sampleRepo: SampleRepositoryPort,
+  ) {
+    super();
+  }
+
+  async process(job: Job<DeactivateSampleJobData>): Promise<void> {
+    const { sampleId, tenantId } = job.data;
+    const sample = await this.sampleRepo.findById(sampleId, tenantId);
+    if (!sample) return; // falha permanente: retry nao resolve
+    if (!SampleDomainService.canDeactivate(sample)) return; // idempotencia
+
+    sample.isActive = false;
+    await this.sampleRepo.update(sample); // erro sobe: BullMQ reagenda
+  }
+
+  // OBRIGATORIOS. O BullMQ sinaliza a falha apenas com `worker.emit(...)`; sem
+  // listener o evento e descartado e nada e logado. Um job que esgota `attempts`
+  // (ou um Redis com senha errada) fica invisivel.
+  @OnWorkerEvent('failed')
+  onFailed(job: Job<DeactivateSampleJobData> | undefined, error: Error): void {
+    this.logger.error(/* job.id, job.name, attemptsMade/attempts, error */);
+  }
+
+  @OnWorkerEvent('error')
+  onError(error: Error): void {
+    this.logger.error(/* erro interno/conexao do worker */);
+  }
+}
+```
+
+Regras que valem para qualquer worker:
+
+- A entrega e **at-least-once** (crash, job stalled, retry): `process()` precisa
+  ser idempotente.
+- Erro lancado consome uma tentativa e o BullMQ reagenda com o `backoff` do
+  adapter. Nao capture o erro so para logar — engolir a excecao marca o job como
+  concluido com sucesso.
+- `@OnWorkerEvent('failed')` e `@OnWorkerEvent('error')` sao obrigatorios: sem
+  eles falha definitiva de job e erro de conexao do worker nao geram log algum.
+- Situacao permanente (registro nao existe mais) retorna sem lancar: retry nunca
+  fara o registro aparecer.
+- O job leva `tenantId` porque o worker roda fora do request e nao tem o
+  `TenantContextMiddleware`.
+
+**Backpressure:** quando o job nao pode rodar agora por motivo temporario (rate
+limit de provedor, quota diaria, janela de horario), devolva o job a fila com
+atraso em vez de segurar o worker:
+
+```typescript
+if (!podeRodarAgora) {
+  await job.moveToDelayed(Date.now() + retryAfterMs, job.token);
+  throw new DelayedError(); // sinaliza "reagendado", nao consome `attempts`
+}
+```
+
+`await sleep(...)` esta errado: o worker tem um numero fixo de slots de
+concorrencia e dormir ocupa um slot inteiro sem fazer nada — com poucos jobs
+bloqueados a fila para mesmo havendo trabalho pronto. (Um `await` longo nao torna
+o job _stalled_: o BullMQ renova o lock em um timer proprio. Quem estoura o lock
+e bloqueio _sincrono_ do event loop ou queda do worker.) `job.token` e
+obrigatorio no `moveToDelayed`.
+
+### 15.5 Wiring no modulo
+
+```typescript
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([SampleTypeormEntity]),
+    // Conexao e opcoes vem do BullModule.forRootAsync do QueueModule.
+    BullModule.registerQueue({ name: SAMPLE_QUEUE_NAME }),
+  ],
+  providers: [
+    { provide: SAMPLE_QUEUE, useClass: SampleQueueAdapter },
+    // Provider comum: o @nestjs/bullmq descobre pelo @Processor e cria o Worker.
+    SampleProcessor,
+    ScheduleSampleDeactivationUseCase,
+  ],
+})
+export class SampleModule {}
+```
+
+### 15.6 Rota que enfileira
+
+Responda `202 Accepted`: o efeito pedido ainda nao aconteceu quando a resposta
+sai. Documente tambem o `503` (`QUEUE_UNAVAILABLE`) que o adapter produz quando o
+broker esta fora — o cliente precisa saber que pode repetir a chamada. Ver
+`POST /api/v1/samples/:id/deactivations` em
+`src/sample/infrastructure/http/sample.controller.ts`.
+
+### 15.7 Teste do processor
+
+O processor e um provider comum, entao testa-se com `new` e um job mockado —
+sem Redis, sem `Test.createTestingModule`. Ver
+`src/sample/infrastructure/queue/sample.processor.spec.ts`: cobre o caminho
+feliz, o filtro por `tenantId`, o registro inexistente, a reentrega idempotente e
+a propagacao do erro de persistencia.
+
+```typescript
+function createJob(
+  data: DeactivateSampleJobData,
+): Job<DeactivateSampleJobData> {
+  return {
+    name: SAMPLE_DEACTIVATE_JOB,
+    data,
+  } as unknown as Job<DeactivateSampleJobData>;
+}
+
+it('propaga falha de persistencia para o BullMQ reagendar', async () => {
+  repo.findById.mockResolvedValue(createSample());
+  repo.update.mockRejectedValue(new Error('connection terminated'));
+
+  await expect(
+    processor.process(createJob({ sampleId: SAMPLE_ID, tenantId: TENANT_ID })),
+  ).rejects.toThrow('connection terminated');
+});
+```
+
+---
+
 ## Checklist Final
 
 - [ ] Entidade de dominio criada em `domain/entities/`
@@ -909,4 +1136,6 @@ describe('SampleDomainService', () => {
 - [ ] Modulo registrado no `AppModule`
 - [ ] Migration criada e executada
 - [ ] Codigos de erro adicionados no `ErrorCode` enum
-- [ ] Testes unitarios escritos para use cases e domain services
+- [ ] Fila declarada (se necessario): port, constantes, adapter e processor em
+      `infrastructure/queue/`
+- [ ] Testes unitarios escritos para use cases, domain services e processors

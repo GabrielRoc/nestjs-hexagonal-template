@@ -141,6 +141,7 @@ A camada de infraestrutura contem tudo que interage com o mundo externo:
 | -------------- | ---------------------------------------------------------------------------------- |
 | `http/`        | Controllers NestJS com decorators de rota, validacao e Swagger                     |
 | `persistence/` | Entidades TypeORM (`.typeorm-entity.ts`) e repositorios (`.typeorm-repository.ts`) |
+| `queue/`       | Adapter de fila (`@InjectQueue`) e processor BullMQ (`extends WorkerHost`)         |
 | `*.module.ts`  | Modulo NestJS que faz o wiring entre ports e adapters                              |
 
 ---
@@ -395,10 +396,11 @@ src/
     pipes/                 # ZodValidationPipe
     utils/                 # pagination, validate-cpf, validate-cnpj
 
-  config/                  # Configuracoes do app, database, supertokens
+  config/                  # Configuracoes do app, database, redis, supertokens
   database/                # DatabaseModule, migrations, typeorm-cli config
+  queue/                   # QueueModule: conexao BullMQ/Redis compartilhada
   logger/                  # Winston logger customizado
-  health/                  # Health check endpoint
+  health/                  # Health check endpoint (db, storage, redis)
   auth/                    # SuperTokens integration
   storage/                 # S3/LocalStack storage adapter
   anti-bot/                # Camadas anti-bot opt-in (@AntiBot), ports + guards
@@ -420,7 +422,7 @@ src/
   sample/                  # Modulo de exemplo (referencia para novos modulos)
     domain/
       entities/            # sample.entity.ts
-      ports/               # sample.repository.port.ts
+      ports/               # sample.repository.port.ts, sample-queue.port.ts
       services/            # sample-domain.service.ts
     application/
       dtos/                # sample.dto.ts (Zod schemas)
@@ -429,5 +431,6 @@ src/
     infrastructure/
       http/                # sample.controller.ts
       persistence/         # sample.typeorm-entity.ts, sample.typeorm-repository.ts
+      queue/               # sample-queue.adapter.ts, sample.processor.ts, constantes
       sample.module.ts     # Wiring do modulo
 ```

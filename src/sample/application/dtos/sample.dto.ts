@@ -16,9 +16,24 @@ export const listSamplesQuerySchema = z.object({
   perPage: z.string().optional().default('20'),
 });
 
+// Agendamento do job de desativacao (fila `sample`). Teto de 24h: delay maior
+// deixa o job parado no Redis por tempo demais — nesses casos use um scheduler.
+export const scheduleSampleDeactivationSchema = z.object({
+  delayMs: z
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 60 * 60 * 1000)
+    .optional()
+    .default(0),
+});
+
 export type CreateSampleDto = z.infer<typeof createSampleSchema>;
 export type UpdateSampleDto = z.infer<typeof updateSampleSchema>;
 export type ListSamplesQuery = z.infer<typeof listSamplesQuerySchema>;
+export type ScheduleSampleDeactivationDto = z.infer<
+  typeof scheduleSampleDeactivationSchema
+>;
 
 export interface SampleResponseDto {
   id: string;

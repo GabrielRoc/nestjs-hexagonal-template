@@ -10,6 +10,7 @@
 - **Docs:** Swagger (@nestjs/swagger)
 - **Observabilidade:** OpenTelemetry + Winston
 - **Storage:** AWS S3 (LocalStack local)
+- **Filas:** BullMQ (@nestjs/bullmq) sobre Redis 7
 - **Seguranca:** Helmet, @nestjs/throttler
 - **Testes:** Jest + Supertest
 
@@ -30,7 +31,8 @@ modulo/
 │   └── mappers/         # Classes estaticas para conversao Entity <-> DTO
 └── infrastructure/
     ├── http/            # Controllers, decorators de rota
-    └── persistence/     # Repositorios TypeORM, entidades ORM
+    ├── persistence/     # Repositorios TypeORM, entidades ORM
+    └── queue/           # Adapters de fila + processors BullMQ (opcional)
 ```
 
 ### Modulos existentes
@@ -41,9 +43,10 @@ modulo/
 | `user`      | `src/user/`      | Gestao de usuarios                        |
 | `tenant`    | `src/tenant/`    | Multi-tenancy                             |
 | `audit-log` | `src/audit-log/` | Log de auditoria                          |
-| `health`    | `src/health/`    | Health check                              |
+| `health`    | `src/health/`    | Health check (db, storage, redis)         |
 | `storage`   | `src/storage/`   | Upload de arquivos (S3)                   |
 | `anti-bot`  | `src/anti-bot/`  | Protecao anti-bot em camadas (opt-in)     |
+| `queue`     | `src/queue/`     | Conexao BullMQ/Redis compartilhada        |
 | `sample`    | `src/sample/`    | Modulo de referencia (pode ser removido)  |
 | `common`    | `src/common/`    | Guards, filters, pipes, decorators, utils |
 
@@ -159,6 +162,55 @@ export class SampleOrmEntity {
   deletedAt: Date | null;
 }
 ```
+
+### Filas (BullMQ)
+
+A conexao Redis e registrada uma vez em `src/queue/queue.module.ts`
+(`BullModule.forRootAsync` lendo do `ConfigService`, nunca de `process.env`) e e
+global: cada modulo de dominio so declara a sua fila. Exemplo completo em
+`src/sample/` — quatro arquivos:
+
+| Arquivo                                          | Papel                                                |
+| ------------------------------------------------ | ---------------------------------------------------- |
+| `domain/ports/sample-queue.port.ts`              | Symbol + interface; a aplicacao nunca importa BullMQ |
+| `infrastructure/queue/sample-queue.constants.ts` | Nome da fila e dos jobs (uma unica fonte da verdade) |
+| `infrastructure/queue/sample-queue.adapter.ts`   | `@InjectQueue`, politica de retry em um lugar so     |
+| `infrastructure/queue/sample.processor.ts`       | `@Processor(NOME)` + `extends WorkerHost`            |
+
+Wiring no modulo: `BullModule.registerQueue({ name })` nos `imports`, o adapter
+ligado ao Symbol e o processor como provider comum.
+
+Regras obrigatorias:
+
+- **Nao** declare `maxRetriesPerRequest` na conexao compartilhada: o BullMQ ja
+  forca `null` na conexao bloqueante do worker (e nao emite aviso quando a chave
+  e omitida), enquanto no produtor `null` faz o `queue.add()` ficar pendurado no
+  request em vez de falhar.
+- Todo `add()` do adapter tem **timeout explicito** (`Promise.race`, ver
+  `sample-queue.adapter.ts`) e traduz o estouro em `QUEUE_UNAVAILABLE` /
+  `503`: com o Redis fora do ar a espera do `add()` nao termina e a resposta
+  HTTP nunca sai.
+- Todo processor registra `@OnWorkerEvent('failed')` e `@OnWorkerEvent('error')`
+  logando em `logger.error`: o BullMQ descarta esses eventos quando nao ha
+  listener, e job que esgota `attempts` desapareceria sem uma linha de log.
+- `backoff: { type: 'exponential', delay }` espera `2^(tentativa-1) * delay`;
+  `attempts: 3` produz 2 reagendamentos (com `delay: 30000`, 30s e 60s).
+- Payload de job carrega **somente identificadores** (`{ id, tenantId }`), nunca
+  a entidade: o JSON fica parado no Redis e chega desatualizado.
+- Todo job leva `tenantId`: o worker roda fora do request e nao tem o
+  `TenantContextMiddleware`.
+- `process()` precisa ser **idempotente** (entrega at-least-once) e deve deixar o
+  erro subir para o BullMQ reagendar; capturar so para logar marca o job como
+  concluido com sucesso.
+- Falha permanente (registro nao existe mais) retorna sem lancar erro.
+- Trabalho que nao pode rodar agora por motivo temporario (rate limit, janela de
+  horario): `job.moveToDelayed(ts, job.token)` + `throw new DelayedError()`.
+  Nunca `sleep` — dormir ocupa um slot de concorrencia sem fazer nada e para a
+  fila (o lock em si continua sendo renovado pelo timer do BullMQ).
+- Rota que apenas enfileira responde `202 Accepted`.
+
+O shutdown ja e coberto: o `@nestjs/bullmq` fecha workers e queues no
+`onApplicationShutdown` e o `main.ts` chama `app.enableShutdownHooks()`.
 
 ---
 
