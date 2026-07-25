@@ -23,7 +23,12 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
 
+# A imagem node ja traz o usuario 'node' (uid 1000). Sem chown: nada escreve em
+# /app em runtime (multer usa memoryStorage), entao dist/ fica somente-leitura
+# para o processo da aplicacao.
+USER node
+
 ENV NODE_ENV=production
 EXPOSE 3000
 
-CMD ["node", "dist/main.js"]
+CMD ["node", "--enable-source-maps", "dist/main.js"]
