@@ -170,23 +170,34 @@ A interface Swagger permite:
 
 ### Via SuperTokens Dashboard
 
-1. Acesse o dashboard do SuperTokens:
+1. Com o servidor da aplicacao rodando (`npm run start:dev`), acesse:
 
 ```
-http://localhost:3567/auth/dashboard
+http://localhost:3000/api/auth/dashboard
 ```
 
-2. Crie um novo usuario com email e senha
+> O dashboard e servido pelo **backend da aplicacao** (`apiDomain` + `apiBasePath`, definidos em `src/config/supertokens.config.ts` e `src/auth/auth.module.ts`). A porta 3567 e apenas o core do SuperTokens (`SUPERTOKENS_CONNECTION_URI`) e nao serve o dashboard.
 
-3. Copie o **User ID** gerado pelo SuperTokens
+2. Na primeira vez, crie o usuario do dashboard direto no core (necessario porque `SUPERTOKENS_API_KEY` e vazio por padrao e o dashboard cai no modo email/senha):
 
-4. (Opcional) Para tornar este usuario superadmin, adicione o ID na variavel `SUPERADMIN_SUPERTOKENS_IDS` no `.env`:
+```bash
+curl -X POST http://localhost:3567/recipe/dashboard/user \
+  -H 'Content-Type: application/json' \
+  -H 'rid: dashboard' \
+  -d '{"email":"admin@example.com","password":"SUA_SENHA_FORTE"}'
+```
+
+3. Faca login no dashboard e crie um novo usuario da aplicacao com email e senha
+
+4. Copie o **User ID** gerado pelo SuperTokens
+
+5. (Opcional) Para tornar este usuario superadmin, adicione o ID na variavel `SUPERADMIN_SUPERTOKENS_IDS` no `.env`:
 
 ```env
 SUPERADMIN_SUPERTOKENS_IDS=<user-id-copiado>
 ```
 
-5. Reinicie o servidor para aplicar as alteracoes
+6. Reinicie o servidor para aplicar as alteracoes
 
 ### Via API
 
