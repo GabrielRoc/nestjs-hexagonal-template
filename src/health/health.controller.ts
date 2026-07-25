@@ -29,7 +29,7 @@ export class HealthController {
   @Public()
   @HealthCheck()
   @ApiOperation({
-    summary: 'Readiness check (banco + storage)',
+    summary: 'Readiness check (banco + storage + redis)',
     description:
       'Responde 503 se alguma dependencia estiver indisponivel. Para sonda de proxy/container use /api/health/live.',
   })
