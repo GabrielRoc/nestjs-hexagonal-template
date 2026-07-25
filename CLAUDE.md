@@ -102,6 +102,7 @@ isolado por tenant. Nao segue as tres camadas hexagonais: e infraestrutura, como
 | Multi-tenancy        | Todo recurso possui `tenantId`; filtrar sempre nas queries          |
 | Controllers          | Apenas validam entrada (Zod) e delegam ao use case                  |
 | Validacao            | `@Body(new ZodValidationPipe(schema))`; **nunca** `@UsePipes(...)`  |
+| Param de rota        | `@Param('id', new UuidValidationPipe())` em toda rota com `:id`     |
 | Autorizacao          | `@Roles(...)` por rota; **nunca** na classe                         |
 | Unique + soft delete | Indice parcial `WHERE "deletedAt" IS NULL`                          |
 
@@ -222,13 +223,23 @@ export class SampleController {
 }
 ```
 
-Duas proibicoes, as duas por bug real e nao por estilo:
+Tres regras, todas por bug real e nao por estilo:
 
 - **Nunca `@UsePipes(new ZodValidationPipe(schema))`.** O `@UsePipes` aplica o
   pipe a **todos** os argumentos do handler — `@Param`, `@Query`, `@TenantId`,
   `@CurrentUser`. A string do id/tenant e validada contra o schema de objeto do
   body e a rota responde **400 sempre**. `test/sample.e2e-spec.ts` tem o teste de
   regressao ("regressao do @UsePipes").
+- **Sempre `@Param('id', new UuidValidationPipe())`** (de
+  `src/common/pipes/uuid-validation.pipe.ts`) em toda rota com `:id`. O outro lado
+  da regra acima, e o caso que so um pipe **por parametro** resolve: sem ele a
+  string crua chega a uma coluna `uuid`, o Postgres estoura
+  `22P02 invalid input syntax for type uuid`, o `QueryFailedError` nao e
+  `HttpException` nem `DomainException` e o `GlobalExceptionFilter` devolve **500
+  `INTERNAL_ERROR`** — qualquer id errado de qualquer cliente virava 5xx com stack
+  de banco no log. Com o pipe e 400 `VALIDATION_ERROR`, no mesmo formato de
+  `details` do Zod, e o `format: 'uuid'` do `@ApiParam` deixa de prometer uma
+  validacao que nao existe.
 - **Nunca `@Roles(...)` na classe.** Na classe, leitura e escrita compartilham
   permissao: quem pode listar passa a poder apagar. Leitura costuma ser
   `ADMIN, USER`; escrita, `ADMIN`.
@@ -356,31 +367,42 @@ paginacao). Referencias: `src/sample/application/use-cases/*.spec.ts`,
 
 **Testes e2e** (`test/*.e2e-spec.ts`) rodam contra um Postgres real com o schema
 criado pela migration (`dropSchema` + `migrationsRun`) — se a migration quebrar,
-o e2e nao sobe — **e contra um Redis real**. O banco tem de terminar em `_test`
-(o harness recusa outro nome); o `docker-compose.yml` cria `template_db_test` no
-primeiro boot do volume e ja sobe o Redis. O que o e2e cobre e o que ele **nao**
-cobre esta no cabecalho de `test/sample.e2e-spec.ts` — leia antes de confiar na
-cobertura.
+o e2e nao sobe — **e contra um Redis real**. Os dois tem guarda de isolamento e o
+harness recusa rodar sem ela: o banco tem de terminar em `_test` e a fila roda em
+`prefix`/`db` proprios (`bull-e2e`, `db` 15). O `docker-compose.yml` cria
+`template_db_test` no primeiro boot do volume e ja sobe o Redis. O que o e2e cobre
+e o que ele **nao** cobre esta no cabecalho de `test/sample.e2e-spec.ts` — leia
+antes de confiar na cobertura.
 
 Duas regras que valem para qualquer e2e novo deste template:
 
 - **Modulo de teste e recorte do `AppModule`, e recorte leva as dependencias
   globais.** Um modulo de dominio que declara fila (`registerQueue` +
-  `@Processor`) so sobe junto com o `QueueModule`, que e quem faz o
-  `BullModule.forRootAsync`: sem ele o `app.init()` estoura
+  `@Processor`) so sobe com um `BullModule.forRoot`/`forRootAsync` no recorte —
+  no app real quem faz isso e o `QueueModule`. Sem ele o `app.init()` estoura
   `Worker requires a connection` no `onModuleInit` do `@nestjs/bullmq` e **todos**
   os testes do arquivo falham, com Redis de pe ou nao. Importar o modulo real e o
   ponto: e o que faz um erro de wiring aparecer no teste em vez de em producao.
   Diagnostico: arquivo de e2e que falha **inteiro em menos de 1s** e dependencia
   de modulo faltando; Redis fora do ar derruba so os testes de fila, e devagar.
+- **O Redis do e2e tem namespace proprio — e obrigatorio.** O e2e declara o seu
+  `BullModule.forRoot` com `prefix` `bull-e2e` e `db` 15 em vez de importar o
+  `QueueModule`, e recusa rodar com prefixo sem `e2e` (a guarda equivalente ao
+  sufixo `_test` do banco). Motivo: o `@Processor` sobe um Worker **de verdade** no
+  `app.init()`; no namespace default (`bull:<fila>`) ele **consome** os jobs
+  pendentes do Redis de quem rodou o teste, e como o registro nao existe no banco
+  de teste o job termina em `completed` e e descartado — dano silencioso, sem erro
+  nenhum. Nao chamar `queue.obliterate()` nao protege: consumir destroi igual. O
+  `prefix` do `forRoot` vale para os dois lados (`@nestjs/bullmq` monta o Worker a
+  partir das opcoes resolvidas da Queue), entao produtor e consumidor continuam
+  reais.
 - **Fila com Redis real, nao dobro em memoria.** Substituir o port de fila por um
   stub no e2e faz o teste parar na borda do port — nada prova que
   `registerQueue`, `@InjectQueue` e `@Processor` apontam para a mesma fila nem que
   o job chega ao worker. Assercao de efeito assincrono e por **polling com
   prazo** (helper `waitUntil` em `test/sample.e2e-spec.ts`), nunca `setTimeout`
-  fixo. O e2e tambem **nao** limpa a fila em massa: `queue.obliterate()` apagaria
-  a fila do ambiente de quem rodou o teste (o Redis nao tem o equivalente do
-  sufixo `_test`), entao cada assercao filtra os jobs pelo id que ela mesma criou.
+  fixo. Dentro do namespace do harness a fila nao e limpa em massa: cada assercao
+  filtra os jobs pelo id que ela mesma criou.
 
 **Duas decisoes de configuracao, para nao serem revertidas por engano:**
 

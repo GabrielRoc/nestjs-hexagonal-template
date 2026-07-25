@@ -174,10 +174,30 @@ Sem Redis, os testes de CRUD continuam passando e apenas os da fila falham — m
 devagar (cada um espera o timeout de 3s do adapter ou o prazo do polling). Se o
 arquivo inteiro falhar em menos de 1s com `Worker requires a connection`, o
 problema nao e o Redis: e um modulo de teste que importou um modulo com
-`@Processor` sem importar o `QueueModule`, que e quem registra a conexao.
+`@Processor` sem nenhum `BullModule.forRoot`, que e quem registra a conexao.
 
-O e2e nao apaga a fila em massa (nada de `queue.obliterate()`), entao rodar contra
-o Redis do seu ambiente nao leva os seus jobs junto.
+#### Namespace do e2e no Redis
+
+O harness usa o **mesmo servidor** Redis (`REDIS_HOST`/`REDIS_PORT`) mas um
+namespace so dele: `prefix` `bull-e2e` e `db` 15 (`E2E_BULL_PREFIX` e
+`E2E_REDIS_DB` sobrescrevem; o prefixo tem de conter `e2e` ou o harness recusa
+rodar). Isso e o equivalente, para o Redis, do sufixo `_test` que protege o banco
+— e nao e cosmetico:
+
+- O `@Processor` do `SampleModule` sobe um Worker **de verdade** no `app.init()`.
+  No namespace de producao (`bull:sample:*`, o default do BullMQ) ele **consome**
+  os jobs pendentes do seu ambiente: o sample nao existe no banco de teste, o
+  `process()` loga um warn, o BullMQ marca o job como concluido e o
+  `removeOnComplete` o descarta. O efeito real nunca acontece e nao sobra erro
+  nenhum para investigar.
+- No sentido inverso, um `npm run start:dev` no ar durante o e2e disputa os jobs
+  do teste com o worker do teste, e o e2e falha sem existir bug algum.
+
+Nao basta "nao chamar `queue.obliterate()`": limpeza em massa nao e o unico jeito
+de destruir job — consumir tambem e.
+
+Dentro do namespace do harness a fila **nao** e limpa em massa; cada assercao
+filtra os jobs pelo `sampleId` que o proprio teste criou.
 
 ### Gerando novas migrations
 

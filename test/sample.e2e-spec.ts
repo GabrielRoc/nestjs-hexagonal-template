@@ -1,7 +1,6 @@
 import type { Server } from 'node:http';
-import { getQueueToken } from '@nestjs/bullmq';
+import { BullModule, getQueueToken } from '@nestjs/bullmq';
 import { INestApplication, Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -21,8 +20,6 @@ import type {
   RequestWithUser,
 } from '../src/common/interfaces/request-with-user.interface';
 
-import { redisConfig } from '../src/config';
-import { QueueModule } from '../src/queue/queue.module';
 import { InitialSchema1784953438174 } from '../src/database/migrations/1784953438174-InitialSchema';
 import { AuditLogTypeormEntity } from '../src/audit-log/infrastructure/persistence/audit-log.typeorm-entity';
 import { TenantTypeormEntity } from '../src/tenant/infrastructure/persistence/tenant.typeorm-entity';
@@ -30,6 +27,7 @@ import { UserTypeormEntity } from '../src/user/infrastructure/persistence/user.t
 
 import { SampleTypeormEntity } from '../src/sample/infrastructure/persistence/sample.typeorm-entity';
 import { SampleModule } from '../src/sample/infrastructure/sample.module';
+import { SampleProcessor } from '../src/sample/infrastructure/queue/sample.processor';
 import type { SampleResponseDto } from '../src/sample/application/dtos/sample.dto';
 import type { DeactivateSampleJobData } from '../src/sample/domain/ports/sample-queue.port';
 import {
@@ -46,8 +44,9 @@ import {
  * migration deste repositorio (`dropSchema` + `migrationsRun`) e um **Redis
  * real** para a fila:
  *
- * - HTTP -> controller -> ZodValidationPipe -> use case -> repositorio TypeORM
- *   -> banco -> envelope de resposta -> GlobalExceptionFilter.
+ * - HTTP -> controller -> ZodValidationPipe/UuidValidationPipe -> use case ->
+ *   repositorio TypeORM -> banco -> envelope de resposta ->
+ *   GlobalExceptionFilter.
  * - O wiring real do `SampleModule` (o modulo e importado como esta em
  *   producao, sem provider redeclarado no teste).
  * - Autorizacao por rota (`@Roles` em cada handler) com o `RolesGuard` real.
@@ -105,25 +104,44 @@ import {
  * `docker-compose.yml` ja sobe um e o job `test-e2e` do CI tem o servico
  * `redis`. Duas falhas diferentes, que e facil confundir:
  *
- * - **Redis inalcancavel** (configurado, ninguem escutando): o app sobe, os 31
- *   testes de CRUD passam e apenas os 5 desta fila falham — devagar, porque cada
+ * - **Redis inalcancavel** (configurado, ninguem escutando): o app sobe, os
+ *   testes de CRUD passam e apenas os desta fila falham — devagar, porque cada
  *   um espera o timeout de 3s do adapter ou o prazo do `waitUntil`.
- * - **Conexao nao configurada** (o modulo de teste importa o `SampleModule` mas
- *   esquece o `QueueModule`): o `@nestjs/bullmq` estoura
- *   `Worker requires a connection` ao instanciar o Worker no `onModuleInit`, o
- *   `app.init()` do `beforeAll` cai e **os 36 testes** falham em menos de 1s,
- *   com Redis de pe ou nao. Um arquivo de e2e que falha inteiro em 1s e sinal de
- *   wiring faltando, nao de servico fora do ar.
+ * - **Conexao nao configurada** (o modulo de teste importa o `SampleModule`, que
+ *   declara a fila e o `@Processor`, mas nenhum `BullModule.forRoot`): o
+ *   `@nestjs/bullmq` estoura `Worker requires a connection` ao instanciar o
+ *   Worker no `onModuleInit`, o `app.init()` do `beforeAll` cai e o arquivo
+ *   **inteiro** falha em menos de 1s, com Redis de pe ou nao. E2e que falha
+ *   inteiro em 1s e sinal de wiring faltando, nao de servico fora do ar.
  *
- * O Redis **nao** e limpo em massa. Nao existe para o Redis o equivalente do
- * sufixo `_test` que protege o banco, e um `queue.obliterate()` apagaria a fila
- * do ambiente de quem rodou o teste. Em vez disso cada assercao filtra os jobs
- * pelo `sampleId` que o proprio teste criou (uuid novo a cada execucao, imune a
- * sobra de rodada anterior) e o unico teste que deixa job parado na fila remove
- * o seu no fim.
+ * O harness roda em um **namespace proprio do Redis** (`prefix` + `db`, ver
+ * `QUEUE_PREFIX`/`QUEUE_REDIS_DB` abaixo). Isso e obrigatorio, e nao um detalhe
+ * de arrumacao: o `@Processor` do `SampleModule` sobe um Worker **de verdade** no
+ * `app.init()`, e sem namespace ele consome `bull:sample:*` do Redis apontado por
+ * `REDIS_HOST`/`REDIS_PORT` — por padrao o mesmo `localhost:6379` do
+ * `docker-compose.yml`, com volume persistente. O worker do teste pegaria o job
+ * enfileirado pelo app de desenvolvimento, nao acharia o sample (o teste aponta
+ * para outro banco), marcaria o job como concluido e o `removeOnComplete` o
+ * descartaria: a desativacao real nunca aconteceria e nao sobraria erro nenhum.
+ * No caminho inverso, um `npm run start:dev` no ar durante o e2e disputaria os
+ * jobs do teste e o `waitUntil` estouraria sem existir bug algum.
  *
- * `process.env` direto e proposital: a regra de ler tudo pelo `ConfigService`
- * vale para codigo de aplicacao, nao para o harness de teste.
+ * Com o namespace isolado, produtor (`registerQueue`/`@InjectQueue`) e consumidor
+ * (`@Processor`) continuam reais e o job continua atravessando o broker — o
+ * `prefix` do `forRoot` e herdado pelos dois (`@nestjs/bullmq` monta o Worker a
+ * partir de `queue.opts`) —, e nada do que o teste faz alcanca as chaves de quem
+ * rodou o teste.
+ *
+ * O Redis ainda **nao** e limpo em massa: um `queue.obliterate()` no meio de um
+ * Worker ativo e ruido desnecessario. Cada assercao filtra os jobs pelo
+ * `sampleId` que o proprio teste criou (uuid novo a cada execucao, imune a sobra
+ * de rodada anterior) e o unico teste que deixa job parado na fila remove o seu
+ * no fim.
+ *
+ * `process.env` direto (e nenhum `ConfigModule` aqui) e proposital: a regra de
+ * ler tudo pelo `ConfigService` vale para codigo de aplicacao, nao para o harness
+ * — e o `ConfigModule.forRoot` carregaria o `.env` do desenvolvedor por cima do
+ * ambiente, escolhendo o Redis de destino pelas costas do teste.
  */
 
 const DB_NAME = process.env.DB_DATABASE ?? 'template_db_test';
@@ -132,6 +150,35 @@ if (!DB_NAME.endsWith('_test')) {
   throw new Error(
     `Recusando rodar o e2e contra o banco "${DB_NAME}": o setup faz dropSchema. ` +
       'Use um banco com sufixo _test (ex.: DB_DATABASE=template_db_test).',
+  );
+}
+
+/**
+ * Prefixo das chaves do BullMQ. O default do BullMQ e `bull`, entao qualquer
+ * coisa diferente ja separa o teste do ambiente; a guarda abaixo existe para que
+ * "simplificar" esta constante de volta para producao falhe alto em vez de
+ * silenciosamente consumir os jobs de alguem.
+ */
+const QUEUE_PREFIX = process.env.E2E_BULL_PREFIX ?? 'bull-e2e';
+
+/**
+ * Banco logico do Redis, defesa em profundidade sobre o prefixo. Override para
+ * servidores que expoem apenas o `db` 0 (o prefixo ja isola sozinho).
+ */
+const QUEUE_REDIS_DB = Number.parseInt(process.env.E2E_REDIS_DB ?? '15', 10);
+
+if (!QUEUE_PREFIX.includes('e2e')) {
+  throw new Error(
+    `Recusando rodar o e2e com o prefixo de fila "${QUEUE_PREFIX}": o harness sobe ` +
+      'um Worker real e consumiria os jobs do Redis do ambiente. Use um prefixo ' +
+      'com "e2e" (ex.: E2E_BULL_PREFIX=bull-e2e).',
+  );
+}
+
+if (!Number.isInteger(QUEUE_REDIS_DB) || QUEUE_REDIS_DB < 0) {
+  throw new Error(
+    `Recusando rodar o e2e com E2E_REDIS_DB="${process.env.E2E_REDIS_DB}": ` +
+      'informe um indice de banco Redis valido (inteiro >= 0).',
   );
 }
 
@@ -174,16 +221,32 @@ interface ErrorBody {
  *
  * Um recorte do `AppModule` tem de levar as dependencias globais dos modulos que
  * escolhe: o `SampleModule` declara a fila (`registerQueue`) e o `@Processor`,
- * mas a **conexao** vem do `BullModule.forRootAsync` do `QueueModule`. Importar
- * um sem o outro faz o `app.init()` estourar `Worker requires a connection` no
- * `onModuleInit` do `@nestjs/bullmq` — e ai falha o arquivo inteiro, com Redis
- * de pe ou nao. O `ConfigModule` com o namespace `redis` entra pelo mesmo
- * motivo: e de onde o `QueueModule` le host e porta.
+ * mas a **conexao** vem de um `BullModule.forRoot`/`forRootAsync` — no app real,
+ * do `QueueModule`. Sem ele o `app.init()` estoura
+ * `Worker requires a connection` no `onModuleInit` do `@nestjs/bullmq` e falha o
+ * arquivo inteiro, com Redis de pe ou nao.
+ *
+ * Aqui esse root e declarado localmente **em vez** de importar o `QueueModule`,
+ * pelo motivo do cabecalho: o `QueueModule` conecta na fila `bull:sample` do
+ * Redis do ambiente e o Worker que este teste sobe passaria a consumir os jobs de
+ * producao/desenvolvimento. Os parametros de conexao sao os mesmos do
+ * `QueueModule` (incluindo a ausencia deliberada de `maxRetriesPerRequest`, ver
+ * `src/queue/queue.module.ts`); o que muda e o namespace.
  */
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, load: [redisConfig] }),
-    QueueModule,
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST ?? 'localhost',
+        port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+        password: process.env.REDIS_PASSWORD?.trim() || undefined,
+        // Segunda camada de isolamento, sobre o prefixo.
+        db: QUEUE_REDIS_DB,
+      },
+      // Vale para a Queue do `registerQueue` E para o Worker do `@Processor`: o
+      // `@nestjs/bullmq` monta o Worker a partir das opcoes resolvidas da Queue.
+      prefix: QUEUE_PREFIX,
+    }),
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST ?? 'localhost',
@@ -699,10 +762,87 @@ describe('Samples (e2e)', () => {
   });
 
   /**
+   * O `:id` chega como string e vai direto para uma coluna `uuid`. Sem o
+   * `UuidValidationPipe` o Postgres rejeita com `22P02 invalid input syntax for
+   * type uuid`, o `QueryFailedError` nao e `HttpException` nem `DomainException`
+   * e o `GlobalExceptionFilter` devolve **500 `INTERNAL_ERROR`** com um stack de
+   * banco no log — para o que e apenas um id malformado, de qualquer cliente ou
+   * scanner.
+   *
+   * Os testes de 404 acima nao cobrem este caminho de proposito: o `MISSING_ID`
+   * deles e um UUID v4 bem formado, que chega ao banco e simplesmente nao acha
+   * linha. Sao dois ramos diferentes.
+   */
+  describe(':id fora do formato UUID v4', () => {
+    const routes: ['get' | 'patch' | 'delete' | 'post', string][] = [
+      ['get', '/api/v1/samples/nao-e-uuid'],
+      ['patch', '/api/v1/samples/nao-e-uuid'],
+      ['delete', '/api/v1/samples/nao-e-uuid'],
+      ['post', '/api/v1/samples/nao-e-uuid/deactivations'],
+    ];
+
+    it.each(routes)(
+      '%s %s responde 400 VALIDATION_ERROR, nunca 500',
+      async (method, url) => {
+        const { status, body } = await send<ErrorBody>(method, url, {});
+
+        expect(status).toBe(400);
+        expect(body.error.code).toBe(ErrorCode.VALIDATION_ERROR);
+        // Mesmo formato de details do ZodValidationPipe: o cliente descobre qual
+        // campo recusou.
+        expect(body.error.details).toEqual([
+          { field: 'id', message: expect.any(String) },
+        ]);
+      },
+    );
+
+    it('recusa UUID de outra versao (todo id do template e v4)', async () => {
+      const v1 = '99999999-9999-1999-8999-999999999999';
+
+      const { status, body } = await send<ErrorBody>(
+        'get',
+        `/api/v1/samples/${v1}`,
+      );
+
+      expect(status).toBe(400);
+      expect(body.error.code).toBe(ErrorCode.VALIDATION_ERROR);
+    });
+  });
+
+  /**
+   * Guarda do isolamento descrito no cabecalho. O `@Processor` do `SampleModule`
+   * sobe um Worker **real** no `app.init()`: se este arquivo voltar a importar o
+   * `QueueModule` (ou perder o `prefix`), o Worker do teste passa a consumir
+   * `bull:sample:*` do Redis do ambiente e engole os jobs de quem rodou o teste —
+   * sem erro nenhum, porque processar um job cujo sample nao existe no banco de
+   * teste termina em `completed`. E um dano silencioso, entao a assercao e sobre o
+   * namespace e nao sobre um efeito observavel.
+   */
+  describe('namespace do harness no Redis', () => {
+    it('produtor e consumidor apontam para o namespace do teste, nao para o do app', () => {
+      const { worker } = app.get(SampleProcessor);
+
+      // `qualifiedName` e o prefixo real das chaves: `<prefix>:<fila>`.
+      expect(queue.qualifiedName).toBe(`${QUEUE_PREFIX}:${SAMPLE_QUEUE_NAME}`);
+      // O `prefix` do `forRoot` tem de chegar aos dois lados; o Worker e criado
+      // pelo `@nestjs/bullmq` a partir das opcoes resolvidas da Queue.
+      expect(worker.qualifiedName).toBe(queue.qualifiedName);
+      // `bull` e o default do BullMQ — o namespace do app de verdade.
+      expect(queue.qualifiedName.startsWith('bull:')).toBe(false);
+    });
+
+    it('a conexao seleciona o db reservado ao teste', async () => {
+      const client = await queue.client;
+
+      expect(client.options).toMatchObject({ db: QUEUE_REDIS_DB });
+    });
+  });
+
+  /**
    * A rota que apenas enfileira trabalho. Diferente das outras, ela atravessa um
    * **Redis real** e um Worker de verdade rodando neste processo: o
-   * `SampleModule` entra completo (adapter + `@Processor`) e a conexao vem do
-   * `QueueModule`, exatamente como no `AppModule`.
+   * `SampleModule` entra completo (adapter + `@Processor`), com a conexao e o
+   * `registerQueue` reais — so o namespace das chaves e do teste.
    *
    * Duas coisas que so este arranjo prova, e que um dobro em memoria no lugar do
    * `SAMPLE_QUEUE` nunca provaria: que a fila do `registerQueue`, o
@@ -738,9 +878,9 @@ describe('Samples (e2e)', () => {
       expect(job.opts.attempts).toBe(3);
       expect(job.opts.backoff).toEqual({ type: 'exponential', delay: 30_000 });
 
-      // Cada teste limpa o que criou. Este arquivo nao apaga a fila em massa
-      // (ver o cabecalho), entao o job agendado para 60s adiante sairia daqui
-      // parado no Redis de quem rodou o teste.
+      // Cada teste limpa o que criou. O namespace e do harness (ver o
+      // cabecalho), entao a sobra nao alcanca ninguem — mas um job agendado para
+      // 60s adiante ficaria parado ate a proxima rodada.
       await job.remove();
     });
 
