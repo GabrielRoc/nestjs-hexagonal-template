@@ -398,14 +398,23 @@ app.use(helmet());
 
 ### CORS
 
-Configurado via variavel de ambiente `CORS_ORIGINS` (lista separada por virgula). O parsing (com `trim`) fica em `src/config/app.config.ts` e o `main.ts` consome a lista pelo `ConfigService`:
+Configurado via variavel de ambiente `CORS_ORIGINS` (lista separada por virgula). O parsing (com `trim`) fica em `src/config/app.config.ts` e o `main.ts` consome a lista pelo `ConfigService`. A mesma lista governa o HTTP **e** o handshake de WebSocket, em dois pontos distintos:
 
 ```typescript
 const corsOrigins = app
   .get(ConfigService)
   .get<string[]>('app.corsOrigins', ['http://localhost:3001']);
-app.enableCors({ origin: corsOrigins, credentials: true });
+app.enableCors({
+  origin: corsOrigins,
+  credentials: true,
+  allowedHeaders: ['content-type', ...SuperTokens.getAllCORSHeaders()],
+});
+
+// Obrigatorio: sem esta linha o handshake do Socket.io aceita QUALQUER Origin.
+app.useWebSocketAdapter(new RealtimeIoAdapter(app, corsOrigins));
 ```
+
+O adapter e necessario porque `@WebSocketGateway({ cors: ... })` e avaliado no carregamento da classe, sem container e sem `ConfigService`. Quem escrever outro bootstrap (worker com WS, `main.ts` de teste de integracao, serverless) precisa registrar o `RealtimeIoAdapter` tambem — o gateway loga um `error` no boot quando ele esta ausente. Ver `src/realtime/realtime-io.adapter.ts`.
 
 ### Rate Limiting
 
