@@ -418,6 +418,18 @@ src/
   tenant/                  # Modulo de tenant (mesmo padrao)
     domain/ -> application/ -> infrastructure/
 
+  tenant-feature/          # Feature flags por tenant (FeatureKey chega VAZIO)
+    domain/
+      entities/            # tenant-feature.entity.ts
+      enums/               # feature-key.enum.ts (preencha no seu projeto)
+      ports/               # repository + cache
+    application/
+      dtos/ mappers/ services/ use-cases/
+    infrastructure/
+      cache/               # in-memory-tenant-feature.cache.ts
+      http/                # controller, FeatureGuard, @RequiresFeature
+      persistence/
+
   user/                    # Modulo de usuario
     domain/ -> application/ -> infrastructure/
 

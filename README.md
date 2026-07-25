@@ -84,6 +84,8 @@ src/
 ├── auth/               # SuperTokens authentication
 ├── audit-log/          # Audit log module
 ├── tenant/             # Tenant module (multi-tenancy)
+├── tenant-feature/     # Per-tenant feature flags (@RequiresFeature + FeatureGuard);
+│                       # FeatureKey ships empty, fill it in your project
 ├── user/               # User module
 ├── sample/             # Sample module (reference implementation)
 ├── storage/            # S3/LocalStack file storage
