@@ -50,6 +50,7 @@ NODE_ENV=development
 PORT=3000
 CORS_ORIGINS=http://localhost:3001,http://localhost:3002
 TRUST_PROXY_HOPS=0
+ENABLE_SWAGGER=true
 
 # Database
 DB_HOST=localhost
@@ -152,7 +153,9 @@ Application running on port 3000
 
 ## 7. Acessar a Documentacao Swagger
 
-Com o servidor rodando, acesse a documentacao interativa da API:
+A doc so e registrada quando `ENABLE_SWAGGER=true` esta no ambiente -- e opt-in explicito, em qualquer `NODE_ENV`. As rotas do Swagger sao registradas direto no adaptador HTTP, fora do pipeline de guards: nao ha autenticacao nenhuma na frente delas, entao a variavel deve ficar ausente fora do ambiente local.
+
+Com a variavel definida e o servidor rodando, acesse a documentacao interativa da API:
 
 ```
 http://localhost:3000/api/docs
@@ -327,3 +330,5 @@ Itens que o template nao resolve sozinho e precisam existir no ambiente de deplo
 - **Rate limit por IP em `/api/auth/*` no proxy ou WAF.** O `ThrottlerGuard` e um `APP_GUARD` e essas rotas nunca chegam aos guards: o middleware Express do `supertokens-nestjs` responde sem chamar `next()`. Sem limite no proxy, login e signup ficam sem protecao contra forca bruta.
 - **`TRUST_PROXY_HOPS` igual ao numero de proxies na frente da app.** Sem isso o throttler usa o IP do balanceador e todos os clientes dividem o mesmo balde. Nunca defina um valor maior que o numero real de proxies: `X-Forwarded-For` passa a ser falsificavel.
 - **Storage compartilhado para o throttler, se rodar mais de uma replica.** O default e in-memory por processo: o limite efetivo vira `THROTTLE_LIMIT` x numero de processos e zera a cada restart.
+- **`s3:ListBucket` na role/usuario IAM da aplicacao, alem de `s3:PutObject`, `s3:GetObject` e `s3:DeleteObject`.** O check de storage do `GET /api/health` usa `HeadBucketCommand`, que exige `s3:ListBucket` sobre o bucket. Uma politica de menor privilegio so com as tres permissoes de objeto faz o health responder **503 permanente** num deploy perfeitamente saudavel -- os uploads funcionam, o health nao.
+- **Nao deixe `AWS_S3_BUCKET` vazio se a aplicacao usa storage.** Sem a variavel o check de storage e ignorado (`configured: false`) e o health continua 200: e proposital para deploys que nao usam S3, mas nao protege quem esqueceu de configurar.

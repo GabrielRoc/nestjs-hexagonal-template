@@ -42,8 +42,12 @@ async function bootstrap() {
   // Global prefix
   app.setGlobalPrefix('api');
 
-  // Swagger (desabilitado em producao)
-  if (process.env.NODE_ENV !== 'production') {
+  // Swagger: opt-in explicito. NODE_ENV !== 'production' deixava a doc exposta
+  // em staging e em `npm run start:prod` sem NODE_ENV (o ConfigModule carrega o
+  // .env com NODE_ENV=development antes desta linha). As rotas do Swagger sao
+  // registradas direto no httpAdapter, fora do pipeline de guards: nao ha
+  // autenticacao nenhuma na frente delas.
+  if (process.env.ENABLE_SWAGGER === 'true') {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('My App API')
       .setDescription('API Documentation')
