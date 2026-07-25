@@ -21,6 +21,7 @@ import { AuthModule } from './auth/auth.module';
 import { AuditLogModule } from './audit-log/infrastructure/audit-log.module';
 import { LoggerModule } from './logger/logger.module';
 import { TenantModule } from './tenant/infrastructure/tenant.module';
+import { TenantFeatureModule } from './tenant-feature/infrastructure/tenant-feature.module';
 import { UserModule } from './user/infrastructure/user.module';
 import { SampleModule } from './sample/infrastructure/sample.module';
 import { StorageModule } from './storage/storage.module';
@@ -31,6 +32,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { TenantGuard } from './common/guards/tenant.guard';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { TenantContextMiddleware } from './common/middleware/tenant-context.middleware';
+import { FeatureGuard } from './tenant-feature/infrastructure/http/feature.guard';
 
 @Module({
   imports: [
@@ -61,6 +63,7 @@ import { TenantContextMiddleware } from './common/middleware/tenant-context.midd
     AuditLogModule,
     LoggerModule,
     TenantModule,
+    TenantFeatureModule,
     UserModule,
     SampleModule,
     StorageModule,
@@ -89,6 +92,12 @@ import { TenantContextMiddleware } from './common/middleware/tenant-context.midd
     {
       provide: APP_GUARD,
       useClass: TenantGuard,
+    },
+    // Precisa vir depois do SuperTokensAuthGuard: sem request.user resolvido o
+    // FeatureGuard nao tem tenant para avaliar e nega a rota.
+    {
+      provide: APP_GUARD,
+      useClass: FeatureGuard,
     },
     {
       provide: APP_GUARD,
