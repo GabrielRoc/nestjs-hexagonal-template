@@ -2,9 +2,9 @@
 
 ## Stack
 
-- **Runtime:** Node.js 20, TypeScript 5
+- **Runtime:** Node.js 24 (22.13+ LTS tambem suportado), TypeScript 5
 - **Framework:** NestJS 11
-- **ORM:** TypeORM 0.3 (PostgreSQL 16)
+- **ORM:** TypeORM 1.1 (PostgreSQL 16)
 - **Autenticacao:** SuperTokens
 - **Validacao:** Zod 4
 - **Docs:** Swagger (@nestjs/swagger)
