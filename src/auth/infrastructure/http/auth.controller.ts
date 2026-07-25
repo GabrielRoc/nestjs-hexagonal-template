@@ -63,8 +63,10 @@ export class AuthController {
   async forgotPassword(
     @Body(new ZodValidationPipe(forgotPasswordSchema)) dto: ForgotPasswordDto,
   ) {
-    // Resposta identica nos dois caminhos: qualquer diferenca (corpo, status ou
-    // tempo de resposta) transformaria a rota em um oraculo de e-mails validos.
+    // Corpo e status identicos nos dois caminhos: qualquer diferenca visivel
+    // transformaria a rota em um oraculo de e-mails cadastrados. O tempo de
+    // resposta ainda difere (o envio do e-mail custa mais); quem precisar fechar
+    // esse canal deve enfileirar o envio. O ThrottlerGuard limita a exploracao.
     const genericResponse = {
       data: { message: 'Se o e-mail existir, enviaremos um link' },
     };
