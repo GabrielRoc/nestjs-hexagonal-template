@@ -10,6 +10,10 @@ services:
       POSTGRES_DB: template_db
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Cria template_db_test (usado por `npm run test:e2e`) no primeiro boot do
+      # volume. Volume que ja existe nao roda o script: veja o comentario dentro
+      # do arquivo para o comando manual.
+      - ./scripts/init-postgres.sh:/docker-entrypoint-initdb.d/init-postgres.sh
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 5s
