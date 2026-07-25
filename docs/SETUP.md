@@ -137,7 +137,7 @@ Aguarde ate que todos os servicos estejam com status `healthy` ou `running`.
 
 ## 5. Criar o Schema do Banco
 
-O template **nao versiona migrations**: as 4 entidades ORM (samples, users, tenants, audit_logs) nao tem DDL commitado e `synchronize` e `false` de proposito. Com o PostgreSQL rodando, gere a migration inicial e execute-a:
+O template **nao versiona migrations**: as 5 entidades ORM (samples, users, tenants, audit_logs, tenant_features) nao tem DDL commitado e `synchronize` e `false` de proposito. Com o PostgreSQL rodando, gere a migration inicial e execute-a:
 
 ```bash
 npm run migration:generate -- src/database/migrations/InitialSchema
@@ -147,6 +147,8 @@ npm run migration:run
 Os dois comandos compilam o projeto antes de chamar o CLI do TypeORM. `migration:run` executa todas as migrations pendentes.
 
 Sem esse passo a aplicacao sobe normalmente, mas a primeira query falha com `relation "..." does not exist` -- e nas rotas autenticadas o erro chega ao cliente como um 403 opaco, nao como erro de banco.
+
+Confira na migration gerada o indice unico **parcial** de `tenant_features` (`... ("tenantId", "featureKey") WHERE "deletedAt" IS NULL`). O predicado vem do `@Index` da entidade e e o que permite recriar uma flag apagada logicamente; um unique comum quebraria o `ON CONFLICT` do upsert de features.
 
 ---
 

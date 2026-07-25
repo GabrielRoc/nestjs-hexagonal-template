@@ -47,6 +47,9 @@ export enum ErrorCode {
   // Queue
   QUEUE_UNAVAILABLE = 'QUEUE_UNAVAILABLE',
 
+  // Tenant Feature
+  FEATURE_DISABLED = 'FEATURE_DISABLED',
+
   // Sample
   SAMPLE_NOT_FOUND = 'SAMPLE_NOT_FOUND',
 
