@@ -20,14 +20,18 @@ import { respondWithFakeSuccess } from '../fake-success';
 export class HoneypotGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const http = context.switchToHttp();
-    const body = http.getRequest<Request>().body as
-      Record<string, unknown> | undefined;
+    const request = http.getRequest<Request>();
+    const body = request.body as Record<string, unknown> | undefined;
 
     if (!body?.[HONEYPOT_FIELD]) {
       return true;
     }
 
-    respondWithFakeSuccess(http.getResponse<Response>());
+    respondWithFakeSuccess(
+      request,
+      http.getResponse<Response>(),
+      'honeypot-field-filled',
+    );
     return false;
   }
 }

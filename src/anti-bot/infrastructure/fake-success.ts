@@ -1,5 +1,10 @@
-import { HttpStatus } from '@nestjs/common';
-import { Response } from 'express';
+import { HttpStatus, Logger } from '@nestjs/common';
+import { Request, Response } from 'express';
+
+/** Camada que descartou a submissao — vai para o log, nunca para a resposta. */
+export type FakeSuccessReason = 'honeypot-field-filled' | 'timing-too-fast';
+
+const logger = new Logger('AntiBotFakeSuccess');
 
 /**
  * Responde 200 com um envelope de sucesso para uma requisicao identificada como
@@ -20,6 +25,23 @@ import { Response } from 'express';
  * devolve 201 com o recurso criado, o ideal e imitar isso; este default serve
  * para rotas de "recebido" (formulario, contato, inscricao).
  */
-export function respondWithFakeSuccess(response: Response): void {
+export function respondWithFakeSuccess(
+  request: Request,
+  response: Response,
+  reason: FakeSuccessReason,
+): void {
+  // O log aqui e OBRIGATORIO, nao um extra: o cliente recebe 200, o handler nunca
+  // roda e nada e gravado, entao sem esta linha a submissao descartada nao deixa
+  // rastro nenhum — o GlobalExceptionFilter tambem retorna cedo quando os headers
+  // ja foram enviados. E `warn` e nao `debug` porque um pico aqui e a unica
+  // evidencia de que uma camada esta descartando gente de verdade (autofill do
+  // navegador na isca, relogio do dispositivo adiantado).
+  //
+  // So rota e motivo: nem valor de campo, nem corpo, nem IP. Log de bloqueio nao
+  // e lugar de dado de formulario.
+  logger.warn(
+    `Discarded submission with a fake success (reason=${reason}, route=${request.method} ${request.originalUrl})`,
+  );
+
   response.status(HttpStatus.OK).json({ data: { success: true } });
 }

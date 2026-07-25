@@ -1,4 +1,4 @@
-import { ExecutionContext, HttpStatus } from '@nestjs/common';
+import { ExecutionContext, HttpStatus, Logger } from '@nestjs/common';
 import { HoneypotGuard } from './honeypot.guard';
 import { HONEYPOT_FIELD } from '../../anti-bot.constants';
 
@@ -10,7 +10,11 @@ function makeContext(body: unknown) {
   const status = jest.fn().mockReturnValue({ json });
   const context = {
     switchToHttp: () => ({
-      getRequest: () => ({ body }),
+      getRequest: () => ({
+        method: 'POST',
+        originalUrl: '/api/v1/contact',
+        body,
+      }),
       getResponse: () => ({ status }),
     }),
   } as unknown as ExecutionContext;
@@ -18,10 +22,21 @@ function makeContext(body: unknown) {
   return { context, status, json, sent };
 }
 
+/** Primeiro argumento da primeira chamada do spy, como texto. */
+function firstMessage(spy: jest.SpyInstance): string {
+  const calls = spy.mock.calls as unknown[][];
+  return String(calls[0][0]);
+}
+
 describe('HoneypotGuard', () => {
   let guard: HoneypotGuard;
+  let loggerWarn: jest.SpyInstance;
 
   beforeEach(() => {
+    // O descarte por sucesso falso e logado; o spy silencia e serve de assercao.
+    loggerWarn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
     guard = new HoneypotGuard();
   });
 
@@ -68,5 +83,29 @@ describe('HoneypotGuard', () => {
 
   it('passa quando nao ha corpo', () => {
     expect(guard.canActivate(makeContext(undefined).context)).toBe(true);
+  });
+
+  it('loga o descarte (a rota e o motivo) sem vazar o valor do campo', () => {
+    const { context } = makeContext({
+      [HONEYPOT_FIELD]: 'http://spam.example',
+      email: 'bot@example.com',
+    });
+
+    guard.canActivate(context);
+
+    // O 200 falso nao deixa rastro nenhum no handler; sem este log, um autofill
+    // do navegador descartando submissao de gente seria invisivel.
+    expect(loggerWarn).toHaveBeenCalledTimes(1);
+    const message = firstMessage(loggerWarn);
+    expect(message).toContain('honeypot-field-filled');
+    expect(message).toContain('POST /api/v1/contact');
+    expect(message).not.toContain('spam.example');
+    expect(message).not.toContain('bot@example.com');
+  });
+
+  it('nao loga nada quando a requisicao passa', () => {
+    guard.canActivate(makeContext({ email: 'joao@example.com' }).context);
+
+    expect(loggerWarn).not.toHaveBeenCalled();
   });
 });

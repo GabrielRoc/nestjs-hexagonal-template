@@ -3,6 +3,7 @@ import { TOKEN_STORE } from '../domain/ports/token-store.port';
 import { AntiBotController } from './http/anti-bot.controller';
 import { tokenStoreProvider } from './persistence/token-store.provider';
 import { ChallengeGuard } from './guards/challenge.guard';
+import { FormTokenConsumeGuard } from './guards/form-token-consume.guard';
 import { FormTokenGuard } from './guards/form-token.guard';
 import { HoneypotGuard } from './guards/honeypot.guard';
 import { TimingGuard } from './guards/timing.guard';
@@ -47,6 +48,7 @@ import { TurnstileVerifyService } from './services/turnstile-verify.service';
     HoneypotGuard,
     TimingGuard,
     FormTokenGuard,
+    FormTokenConsumeGuard,
     TurnstileGuard,
     ChallengeGuard,
     BodySanitizerInterceptor,
@@ -55,7 +57,9 @@ import { TurnstileVerifyService } from './services/turnstile-verify.service';
   // que os guards resolvem no injector do modulo que declara o controller: sem
   // exportar, `@AntiBot()` nao sobe em modulo nenhum de fora daqui. Os guards e
   // o interceptor vao junto porque um modulo consumidor pode querer injetar um
-  // deles direto (ex.: `@UseGuards(TurnstileGuard)` sozinho).
+  // deles direto (ex.: `@UseGuards(TurnstileGuard)` sozinho). O
+  // FormTokenConsumeGuard e a excecao a essa liberdade: ele NAO funciona sozinho,
+  // porque le o token que o FormTokenGuard verificou — use `@AntiBot()`.
   exports: [
     TOKEN_STORE,
     FormTokenService,
@@ -63,6 +67,7 @@ import { TurnstileVerifyService } from './services/turnstile-verify.service';
     HoneypotGuard,
     TimingGuard,
     FormTokenGuard,
+    FormTokenConsumeGuard,
     TurnstileGuard,
     ChallengeGuard,
     BodySanitizerInterceptor,

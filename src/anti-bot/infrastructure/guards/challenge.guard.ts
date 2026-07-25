@@ -21,12 +21,18 @@ import {
 } from '../../domain/ports/challenge-resource.port';
 
 /**
- * Camada 4 — desafio por recurso.
+ * Camada 5 — desafio por recurso.
  *
  * ATAQUE QUE PARA: acesso em massa a um recurso publico cujo dono quer restringir
  * a quem tem uma informacao combinada fora do site (uma palavra passada no
  * convite, o nome de um mascote). Nao e captcha nem senha: o objetivo e cortar
  * quem descobriu a URL, sem obrigar o visitante a criar conta.
+ *
+ * Roda ANTES do consumo do form token (`FormTokenConsumeGuard`), de proposito: a
+ * resposta errada e o erro HUMANO mais provavel de todo o stack e a mensagem manda
+ * "tente novamente". Com o token ja gasto, corrigir um typo e reenviar o mesmo
+ * formulario batia em "token ja utilizado" — um erro de digitacao trancava o
+ * formulario.
  *
  * PASSA DIRETO quando:
  * - nenhuma implementacao de `CHALLENGE_RESOURCE_RESOLVER` esta ligada — e o

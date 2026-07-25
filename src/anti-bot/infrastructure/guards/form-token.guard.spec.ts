@@ -1,8 +1,9 @@
 import { ExecutionContext, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Request } from 'express';
 import { FormTokenGuard } from './form-token.guard';
 import { FORM_TOKEN_HEADER } from '../../anti-bot.constants';
-import { InMemoryTokenStore } from '../persistence/in-memory-token-store';
+import { getVerifiedFormToken } from '../form-token-context';
 import { FormTokenService } from '../services/form-token.service';
 import { DomainException } from '../../../common/exceptions/domain.exception';
 import { ErrorCode } from '../../../common/enums/error-codes.enum';
@@ -21,21 +22,20 @@ function configService(): ConfigService {
   } as unknown as ConfigService;
 }
 
-function makeContext(header: unknown): ExecutionContext {
-  return {
-    switchToHttp: () => ({
-      getRequest: () => ({
-        headers: header === undefined ? {} : { [FORM_TOKEN_HEADER]: header },
-      }),
-    }),
+function makeContext(header: unknown) {
+  const request = {
+    headers: header === undefined ? {} : { [FORM_TOKEN_HEADER]: header },
+  } as unknown as Request;
+  const context = {
+    switchToHttp: () => ({ getRequest: () => request }),
   } as unknown as ExecutionContext;
+
+  return { context, request };
 }
 
-async function catchDomainException(
-  fn: () => Promise<unknown>,
-): Promise<DomainException> {
+function catchDomainException(fn: () => unknown): DomainException {
   try {
-    await fn();
+    fn();
   } catch (error) {
     return error as DomainException;
   }
@@ -45,99 +45,98 @@ async function catchDomainException(
 describe('FormTokenGuard', () => {
   let guard: FormTokenGuard;
   let formTokenService: FormTokenService;
-  let store: InMemoryTokenStore;
   let now: number;
 
   beforeEach(() => {
     now = NOW;
     jest.spyOn(Date, 'now').mockImplementation(() => now);
-    // Servico e store reais: "uso unico" e o resultado da conversa entre os dois,
-    // e um store mockado provaria apenas que o guard chama um mock.
+    // Servico real: o que este guard promete e "so token que a API emitiu passa",
+    // e com um verify mockado o teste provaria apenas que o guard chama um mock.
     formTokenService = new FormTokenService(configService());
-    store = new InMemoryTokenStore();
-    guard = new FormTokenGuard(formTokenService, store);
+    guard = new FormTokenGuard(formTokenService);
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('aceita o token emitido pela API', async () => {
+  it('aceita o token emitido pela API', () => {
     const { token } = formTokenService.issue('signup');
 
-    await expect(guard.canActivate(makeContext(token))).resolves.toBe(true);
+    expect(guard.canActivate(makeContext(token).context)).toBe(true);
   });
 
-  it('recusa o mesmo token na segunda submissao (uso unico)', async () => {
+  it('deixa o payload verificado na requisicao para as camadas seguintes', () => {
     const { token } = formTokenService.issue('signup');
-    await guard.canActivate(makeContext(token));
+    const { context, request } = makeContext(token);
 
-    const error = await catchDomainException(() =>
-      guard.canActivate(makeContext(token)),
+    guard.canActivate(context);
+
+    const payload = getVerifiedFormToken(request);
+    expect(payload?.context).toBe('signup');
+    // O `iat` assinado e o que o TimingGuard usa em vez do relogio do cliente.
+    expect(payload?.iat).toBe(NOW / 1000);
+  });
+
+  it('NAO gasta o token: verificar nao consome (quem consome e o consume guard)', () => {
+    const { token } = formTokenService.issue('signup');
+
+    // A segunda passagem pelo mesmo token tem de continuar valida — e o que
+    // permite ao usuario reenviar o formulario depois de o desafio ou o Turnstile
+    // recusarem a tentativa anterior dizendo "tente novamente".
+    expect(guard.canActivate(makeContext(token).context)).toBe(true);
+    expect(guard.canActivate(makeContext(token).context)).toBe(true);
+  });
+
+  it('recusa quando o header nao vem', () => {
+    const error = catchDomainException(() =>
+      guard.canActivate(makeContext(undefined).context),
     );
 
     expect(error.code).toBe(ErrorCode.ANTI_BOT_FORM_TOKEN_INVALID);
     expect(error.httpStatus).toBe(HttpStatus.BAD_REQUEST);
   });
 
-  it('recusa quando o header nao vem', async () => {
-    const error = await catchDomainException(() =>
-      guard.canActivate(makeContext(undefined)),
-    );
-
-    expect(error.code).toBe(ErrorCode.ANTI_BOT_FORM_TOKEN_INVALID);
+  it('recusa header vazio ou com apenas espaco', () => {
+    expect(
+      catchDomainException(() => guard.canActivate(makeContext('   ').context)),
+    ).toBeInstanceOf(DomainException);
   });
 
-  it('recusa header vazio ou com apenas espaco', async () => {
-    await expect(
-      catchDomainException(() => guard.canActivate(makeContext('   '))),
-    ).resolves.toBeInstanceOf(DomainException);
-  });
-
-  it('recusa token assinado com outro segredo', async () => {
+  it('recusa token assinado com outro segredo', () => {
     const foreignConfig = {
       get: (key: string, fallback?: unknown) =>
         key === 'antiBot.tokenSecret' ? 'b'.repeat(64) : fallback,
     } as unknown as ConfigService;
     const { token } = new FormTokenService(foreignConfig).issue('signup');
 
-    const error = await catchDomainException(() =>
-      guard.canActivate(makeContext(token)),
+    const error = catchDomainException(() =>
+      guard.canActivate(makeContext(token).context),
     );
 
     expect(error.code).toBe(ErrorCode.ANTI_BOT_FORM_TOKEN_INVALID);
   });
 
-  it('recusa token expirado com codigo de formulario expirado', async () => {
+  it('recusa token expirado com codigo de formulario expirado', () => {
     const { token } = formTokenService.issue('signup');
 
     now = NOW + MAX_MS + 1;
 
-    const error = await catchDomainException(() =>
-      guard.canActivate(makeContext(token)),
+    const error = catchDomainException(() =>
+      guard.canActivate(makeContext(token).context),
     );
 
     expect(error.code).toBe(ErrorCode.ANTI_BOT_FORM_EXPIRED);
   });
 
-  it('nao gasta o token quando ele e rejeitado por expiracao', async () => {
-    const markUsed = jest.spyOn(store, 'markUsed');
+  it('nao deixa payload na requisicao quando rejeita', () => {
     const { token } = formTokenService.issue('signup');
+    const { context, request } = makeContext(token);
 
     now = NOW + MAX_MS + 1;
-    await catchDomainException(() => guard.canActivate(makeContext(token)));
+    catchDomainException(() => guard.canActivate(context));
 
-    expect(markUsed).not.toHaveBeenCalled();
-  });
-
-  it('marca o uso com TTL que cobre o tempo restante do token', async () => {
-    const markUsed = jest.spyOn(store, 'markUsed');
-    const { token } = formTokenService.issue('signup');
-
-    now = NOW + 1_000;
-    await guard.canActivate(makeContext(token));
-
-    const [, ttlMs] = markUsed.mock.calls[0];
-    expect(ttlMs).toBe(MAX_MS - 1_000);
+    // Sem isso, o consume guard que roda depois gastaria um token ja expirado.
+    expect(getVerifiedFormToken(request)).toBeUndefined();
   });
 });

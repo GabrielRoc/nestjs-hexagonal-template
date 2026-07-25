@@ -12,13 +12,18 @@ import { TURNSTILE_FIELD } from '../../anti-bot.constants';
 import { TurnstileVerifyService } from '../services/turnstile-verify.service';
 
 /**
- * Camada 5 — CAPTCHA (Cloudflare Turnstile).
+ * Camada 4 — CAPTCHA (Cloudflare Turnstile).
  *
  * ATAQUE QUE PARA: automacao com navegador de verdade (Puppeteer/Playwright), que
  * passa por isca, timing e form token sem dificuldade porque executa o JS da
  * pagina. O Turnstile avalia sinais do browser do lado da Cloudflare e o token
  * resultante e verificado server-side aqui; nao da para reaproveitar (a
  * Cloudflare recusa o mesmo token duas vezes).
+ *
+ * Roda ANTES do consumo do form token (`FormTokenConsumeGuard`), de proposito: a
+ * mensagem daqui manda "tente novamente", e a Cloudflare pode falhar por timeout
+ * de rede. Com o token ja gasto, a segunda tentativa com o mesmo formulario
+ * morreria em "token ja utilizado" e a instrucao seria impossivel de seguir.
  *
  * INERTE por default: sem `TURNSTILE_ENABLED=true` passa direto e nem chama a
  * Cloudflare. E o unico jeito de o guard poder ficar declarado em rotas publicas
