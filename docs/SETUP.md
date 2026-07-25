@@ -119,15 +119,18 @@ Aguarde ate que todos os servicos estejam com status `healthy` ou `running`.
 
 ---
 
-## 5. Executar Migrations
+## 5. Criar o Schema do Banco
 
-Com o PostgreSQL rodando, execute as migrations para criar as tabelas:
+O template **nao versiona migrations**: as 4 entidades ORM (samples, users, tenants, audit_logs) nao tem DDL commitado e `synchronize` e `false` de proposito. Com o PostgreSQL rodando, gere a migration inicial e execute-a:
 
 ```bash
+npm run migration:generate -- src/database/migrations/InitialSchema
 npm run migration:run
 ```
 
-Este comando compila o projeto e executa todas as migrations pendentes.
+Os dois comandos compilam o projeto antes de chamar o CLI do TypeORM. `migration:run` executa todas as migrations pendentes.
+
+Sem esse passo a aplicacao sobe normalmente, mas a primeira query falha com `relation "..." does not exist` -- e nas rotas autenticadas o erro chega ao cliente como um 403 opaco, nao como erro de banco.
 
 ---
 

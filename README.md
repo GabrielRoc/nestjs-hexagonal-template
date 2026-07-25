@@ -20,7 +20,11 @@ cp .env.example .env
 # 4. Start infrastructure (PostgreSQL, SuperTokens, LocalStack)
 docker compose up -d
 
-# 5. Run the application in development mode
+# 5. Create the database schema (the template ships no committed migration)
+npm run migration:generate -- src/database/migrations/InitialSchema
+npm run migration:run
+
+# 6. Run the application in development mode
 npm run start:dev
 ```
 
