@@ -11,10 +11,12 @@ import {
   antiBotConfig,
   appConfig,
   databaseConfig,
+  redisConfig,
   supertokensConfig,
 } from './config';
 import { DatabaseModule } from './database/database.module';
 import { AntiBotModule } from './anti-bot/infrastructure/anti-bot.module';
+import { QueueModule } from './queue/queue.module';
 import { AuthModule } from './auth/auth.module';
 import { AuditLogModule } from './audit-log/infrastructure/audit-log.module';
 import { LoggerModule } from './logger/logger.module';
@@ -34,7 +36,13 @@ import { TenantContextMiddleware } from './common/middleware/tenant-context.midd
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [antiBotConfig, appConfig, databaseConfig, supertokensConfig],
+      load: [
+        antiBotConfig,
+        appConfig,
+        databaseConfig,
+        redisConfig,
+        supertokensConfig,
+      ],
     }),
     ThrottlerModule.forRoot([
       {
@@ -48,6 +56,7 @@ import { TenantContextMiddleware } from './common/middleware/tenant-context.midd
     // na rota, e o TurnstileGuard das rotas de auth fica inerte enquanto
     // TURNSTILE_ENABLED nao for `true`.
     AntiBotModule,
+    QueueModule,
     AuthModule,
     AuditLogModule,
     LoggerModule,

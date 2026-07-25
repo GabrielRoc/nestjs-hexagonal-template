@@ -27,6 +27,19 @@ services:
     environment:
       POSTGRESQL_CONNECTION_URI: postgresql://postgres:postgres@postgres:5432/template_db
 
+  redis:
+    image: redis:7-alpine
+    container_name: template-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   localstack:
     image: localstack/localstack:latest
     container_name: template-localstack
@@ -44,4 +57,5 @@ services:
 
 volumes:
   pgdata:
+  redis_data:
   localstack_data:
