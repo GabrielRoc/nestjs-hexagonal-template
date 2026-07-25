@@ -7,8 +7,14 @@ import {
   SuperTokensExceptionFilter,
 } from 'supertokens-nestjs';
 
-import { appConfig, databaseConfig, supertokensConfig } from './config';
+import {
+  antiBotConfig,
+  appConfig,
+  databaseConfig,
+  supertokensConfig,
+} from './config';
 import { DatabaseModule } from './database/database.module';
+import { AntiBotModule } from './anti-bot/infrastructure/anti-bot.module';
 import { AuthModule } from './auth/auth.module';
 import { AuditLogModule } from './audit-log/infrastructure/audit-log.module';
 import { LoggerModule } from './logger/logger.module';
@@ -28,7 +34,7 @@ import { TenantContextMiddleware } from './common/middleware/tenant-context.midd
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, supertokensConfig],
+      load: [antiBotConfig, appConfig, databaseConfig, supertokensConfig],
     }),
     ThrottlerModule.forRoot([
       {
@@ -37,6 +43,11 @@ import { TenantContextMiddleware } from './common/middleware/tenant-context.midd
       },
     ]),
     DatabaseModule,
+    // Registrado por default para publicar GET /api/v1/anti-bot/*. Nenhuma rota
+    // existente ganha camada nova por isso: as camadas entram por `@AntiBot()`
+    // na rota, e o TurnstileGuard das rotas de auth fica inerte enquanto
+    // TURNSTILE_ENABLED nao for `true`.
+    AntiBotModule,
     AuthModule,
     AuditLogModule,
     LoggerModule,

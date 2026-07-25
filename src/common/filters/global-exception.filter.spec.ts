@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   InternalServerErrorException,
@@ -178,6 +179,23 @@ describe('GlobalExceptionFilter', () => {
     expect(json).toHaveBeenCalledWith({
       error: { code: 'SAMPLE_NOT_FOUND', message: 'Nao encontrado' },
     });
+  });
+
+  it('nao escreve de novo quando um guard ja respondeu', () => {
+    // HoneypotGuard responde 200 e retorna false; o Nest transforma o false em
+    // ForbiddenException e cai aqui. Escrever de novo lancaria
+    // ERR_HTTP_HEADERS_SENT dentro do filtro e derrubaria a conexao — o que
+    // denunciaria o bloqueio que o sucesso falso existe para esconder.
+    const sentHost = {
+      switchToHttp: () => ({
+        getResponse: () => ({ status, headersSent: true }),
+      }),
+    } as unknown as ArgumentsHost;
+
+    filter.catch(new ForbiddenException(), sentHost);
+
+    expect(status).not.toHaveBeenCalled();
+    expect(json).not.toHaveBeenCalled();
   });
 
   it('nao vaza detalhe de excecao desconhecida', () => {

@@ -43,6 +43,7 @@ modulo/
 | `audit-log` | `src/audit-log/` | Log de auditoria                          |
 | `health`    | `src/health/`    | Health check                              |
 | `storage`   | `src/storage/`   | Upload de arquivos (S3)                   |
+| `anti-bot`  | `src/anti-bot/`  | Protecao anti-bot em camadas (opt-in)     |
 | `sample`    | `src/sample/`    | Modulo de referencia (pode ser removido)  |
 | `common`    | `src/common/`    | Guards, filters, pipes, decorators, utils |
 
@@ -158,6 +159,75 @@ export class SampleOrmEntity {
   deletedAt: Date | null;
 }
 ```
+
+---
+
+## Modulo anti-bot (`src/anti-bot/`)
+
+Cinco camadas independentes para formularios publicos, compostas pelo decorator
+`@AntiBot()`. Cada camada resolve um ataque diferente; nenhuma delas basta sozinha.
+
+| Camada                     | O que para                                                    | Ao pegar                     |
+| -------------------------- | ------------------------------------------------------------- | ---------------------------- |
+| `HoneypotGuard`            | bot que preenche todo `<input>` (campo isca `website`)        | **200 falso**                |
+| `TimingGuard`              | submit instantaneo (script) e formulario velho (replay/aba)   | 200 falso / 400 expirado     |
+| `FormTokenGuard`           | POST direto sem carregar o form, e reenvio do mesmo corpo     | 400 (falha **fechada**)      |
+| `ChallengeGuard`           | acesso a recurso restrito por resposta combinada fora do site | 400                          |
+| `TurnstileGuard`           | automacao com navegador real (Puppeteer/Playwright)           | 400 (inerte se desabilitado) |
+| `BodySanitizerInterceptor` | remove os campos de controle antes do DTO/dominio/audit log   | —                            |
+
+O **200 falso** e deliberado: um 403 diz ao atacante qual campo era a isca ou
+quanto tempo esperar, e ele corrige em duas tentativas. Detalhes em
+`src/anti-bot/infrastructure/fake-success.ts`.
+
+### Ligando numa rota
+
+```typescript
+@Module({
+  imports: [AntiBotModule], // obrigatorio: os guards resolvem DI neste modulo
+  controllers: [ThingController],
+})
+export class ThingModule {}
+
+@Post(':slug/messages')
+@Public()
+@AntiBot({ challengeParam: 'slug' })
+@ApiResponse({ status: 400, type: ErrorResponseSwagger })
+async create(@Body(new ZodValidationPipe(createMessageSchema)) dto: CreateMessageDto) {}
+```
+
+O frontend precisa: chamar `GET /api/v1/anti-bot/form-token` ao renderizar e
+mandar o valor no header `x-form-token`; enviar `_t` com `Date.now()` da
+renderizacao; e um input escondido `website` (vazio).
+
+Nao use `@AntiBot()` em rota cujo frontend nao busca form token — o
+`FormTokenGuard` falha fechado. Para rotas em que so o CAPTCHA faz sentido
+(recuperacao de senha, por exemplo, onde ele ja esta aplicado), use
+`@UseGuards(TurnstileGuard)`.
+
+### Desafio por recurso
+
+O `ChallengeGuard` depende do port `CHALLENGE_RESOURCE_RESOLVER`
+(`domain/ports/challenge-resource.port.ts`). Sem implementacao ligada ele passa
+direto. Ligue no MESMO modulo que declara o controller:
+
+```typescript
+providers: [{ provide: CHALLENGE_RESOURCE_RESOLVER, useClass: ThingChallengeResolver }],
+```
+
+### Token store
+
+`TOKEN_STORE` guarda os `jti` ja usados. O template traz so o adapter em memoria:
+uso unico **por processo**, e um restart/deploy esvazia o registro. Para uso unico
+global, implemente o adapter Redis descrito em
+`infrastructure/persistence/token-store.provider.ts`.
+
+### Default
+
+Inerte, nao desligado: o modulo sobe sempre e publica `GET /api/v1/anti-bot/*`,
+mas nenhuma rota existente ganha checagem — as camadas entram por `@AntiBot()`, e
+o `TurnstileGuard` das rotas de auth so exige captcha quando
+`TURNSTILE_ENABLED=true`. Variaveis em `.env.example`.
 
 ---
 

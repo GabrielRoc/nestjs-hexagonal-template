@@ -423,6 +423,19 @@ Duas limitacoes que precisam ser conhecidas antes de contar com ele em producao:
 
 A chave do balde e `req.ip`. Atras de proxy, defina `TRUST_PROXY_HOPS` (ver `.env.example`), senao todos os clientes compartilham o mesmo balde.
 
+### Anti-Bot
+
+Camadas opt-in para formularios publicos (`src/anti-bot/`), aplicadas por rota com
+`@AntiBot()`. Variaveis em `.env.example`; a unica obrigatoria em producao e
+`ANTI_BOT_TOKEN_SECRET` (chave HMAC dos form tokens). Duas limitacoes conhecidas:
+
+- o registro de tokens usados e **in-memory por processo**, entao o uso unico vale por
+  instancia e zera no restart (mesma limitacao do throttler; a solucao tambem e Redis);
+- `TURNSTILE_FAIL_OPEN=true` (default) libera a requisicao quando a Cloudflare esta
+  inacessivel — disponibilidade sobre rigor. `false` inverte a escolha.
+
+Ver a secao "Modulo anti-bot" no `CLAUDE.md` para o que cada camada bloqueia.
+
 ### URLs Assinadas (S3)
 
 Para acesso a arquivos, usar URLs pre-assinadas com tempo de expiracao configuravel:
