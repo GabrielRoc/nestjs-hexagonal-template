@@ -59,9 +59,15 @@ export class ImageProcessingService {
     width: number,
     quality: number,
   ): Promise<Buffer> {
-    return sharp(buffer, SHARP_OPTIONS)
-      .resize(width, undefined, { withoutEnlargement: true, fit: 'inside' })
-      .webp({ quality })
-      .toBuffer();
+    return (
+      sharp(buffer, SHARP_OPTIONS)
+        // Sem .rotate() o sharp ignora a orientacao EXIF e o .webp() descarta a
+        // tag: toda foto de celular em retrato e gravada deitada, sem retorno.
+        // No-op na segunda passada (o WebP otimizado ja nao carrega EXIF).
+        .rotate()
+        .resize(width, undefined, { withoutEnlargement: true, fit: 'inside' })
+        .webp({ quality })
+        .toBuffer()
+    );
   }
 }
