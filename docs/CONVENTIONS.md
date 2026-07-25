@@ -68,26 +68,26 @@ DELETE /api/v1/samples/:id
 
 Cada tipo de artefato possui um sufixo padrao para facilitar a identificacao:
 
-| Sufixo | Camada | Descricao |
-|---|---|---|
-| `.entity.ts` | Domain | Entidade pura de dominio |
-| `.typeorm-entity.ts` | Infrastructure | Entidade decorada com TypeORM |
-| `.repository.port.ts` | Domain | Interface (port) do repositorio |
-| `.typeorm-repository.ts` | Infrastructure | Implementacao TypeORM do port |
-| `.use-case.ts` | Application | Caso de uso |
-| `.mapper.ts` | Application | Conversao entre camadas |
-| `.dto.ts` | Application | Schemas Zod e tipos de transferencia |
-| `.controller.ts` | Infrastructure | Controller HTTP NestJS |
-| `.module.ts` | Infrastructure | Modulo NestJS (wiring) |
-| `.service.ts` | Domain/Infra | Domain service ou servico de infra |
-| `.guard.ts` | Common | Guard de autorizacao |
-| `.pipe.ts` | Common | Pipe de validacao |
-| `.middleware.ts` | Common | Middleware Express/NestJS |
-| `.filter.ts` | Common | Exception filter |
-| `.interceptor.ts` | Common | Interceptor NestJS |
-| `.decorator.ts` | Common | Decorator customizado |
-| `.spec.ts` | Test | Arquivo de teste unitario |
-| `.e2e-spec.ts` | Test | Arquivo de teste end-to-end |
+| Sufixo                   | Camada         | Descricao                            |
+| ------------------------ | -------------- | ------------------------------------ |
+| `.entity.ts`             | Domain         | Entidade pura de dominio             |
+| `.typeorm-entity.ts`     | Infrastructure | Entidade decorada com TypeORM        |
+| `.repository.port.ts`    | Domain         | Interface (port) do repositorio      |
+| `.typeorm-repository.ts` | Infrastructure | Implementacao TypeORM do port        |
+| `.use-case.ts`           | Application    | Caso de uso                          |
+| `.mapper.ts`             | Application    | Conversao entre camadas              |
+| `.dto.ts`                | Application    | Schemas Zod e tipos de transferencia |
+| `.controller.ts`         | Infrastructure | Controller HTTP NestJS               |
+| `.module.ts`             | Infrastructure | Modulo NestJS (wiring)               |
+| `.service.ts`            | Domain/Infra   | Domain service ou servico de infra   |
+| `.guard.ts`              | Common         | Guard de autorizacao                 |
+| `.pipe.ts`               | Common         | Pipe de validacao                    |
+| `.middleware.ts`         | Common         | Middleware Express/NestJS            |
+| `.filter.ts`             | Common         | Exception filter                     |
+| `.interceptor.ts`        | Common         | Interceptor NestJS                   |
+| `.decorator.ts`          | Common         | Decorator customizado                |
+| `.spec.ts`               | Test           | Arquivo de teste unitario            |
+| `.e2e-spec.ts`           | Test           | Arquivo de teste end-to-end          |
 
 ---
 
@@ -190,8 +190,14 @@ Para erros de validacao, o campo `details` contem a lista de problemas:
     "code": "VALIDATION_ERROR",
     "message": "Erro de validacao",
     "details": [
-      { "field": "name", "message": "String must contain at least 2 character(s)" },
-      { "field": "description", "message": "String must contain at most 1000 character(s)" }
+      {
+        "field": "name",
+        "message": "String must contain at least 2 character(s)"
+      },
+      {
+        "field": "description",
+        "message": "String must contain at most 1000 character(s)"
+      }
     ]
   }
 }
@@ -226,13 +232,13 @@ USER_EMAIL_ALREADY_EXISTS
 
 ### Prefixos por Modulo
 
-| Modulo | Prefixo | Exemplos |
-|---|---|---|
-| Global | *(sem prefixo)* | `INTERNAL_ERROR`, `VALIDATION_ERROR` |
-| Auth | `AUTH_` | `AUTH_INSUFFICIENT_ROLE`, `AUTH_SESSION_EXPIRED` |
-| Tenant | `TENANT_` | `TENANT_NOT_FOUND`, `TENANT_CONTEXT_MISSING`, `TENANT_DOCUMENT_ALREADY_EXISTS` |
-| User | `USER_` | `USER_NOT_FOUND`, `USER_EMAIL_ALREADY_EXISTS`, `USER_LAST_ADMIN` |
-| Sample | `SAMPLE_` | `SAMPLE_NOT_FOUND` |
+| Modulo | Prefixo         | Exemplos                                                                       |
+| ------ | --------------- | ------------------------------------------------------------------------------ |
+| Global | _(sem prefixo)_ | `INTERNAL_ERROR`, `VALIDATION_ERROR`                                           |
+| Auth   | `AUTH_`         | `AUTH_INSUFFICIENT_ROLE`, `AUTH_SESSION_EXPIRED`                               |
+| Tenant | `TENANT_`       | `TENANT_NOT_FOUND`, `TENANT_CONTEXT_MISSING`, `TENANT_DOCUMENT_ALREADY_EXISTS` |
+| User   | `USER_`         | `USER_NOT_FOUND`, `USER_EMAIL_ALREADY_EXISTS`, `USER_LAST_ADMIN`               |
+| Sample | `SAMPLE_`       | `SAMPLE_NOT_FOUND`                                                             |
 
 Ao criar um novo modulo, adicione os codigos no enum `ErrorCode` em `src/common/enums/error-codes.enum.ts` seguindo o padrao de prefixo.
 
@@ -295,10 +301,11 @@ O projeto inclui utilitarios com validacao de checksum em `src/common/utils/`:
 import { validateCpf } from '../../../common/utils/validate-cpf';
 import { validateCnpj } from '../../../common/utils/validate-cnpj';
 
-const documentSchema = z.string().refine(
-  (val) => validateCpf(val) || validateCnpj(val),
-  { message: 'CPF ou CNPJ invalido' }
-);
+const documentSchema = z
+  .string()
+  .refine((val) => validateCpf(val) || validateCnpj(val), {
+    message: 'CPF ou CNPJ invalido',
+  });
 ```
 
 ---
@@ -427,17 +434,17 @@ SIGNED_URL_EXPIRY_SECONDS=900
 
 Todos os commits devem seguir o padrao [Conventional Commits](https://www.conventionalcommits.org/):
 
-| Prefixo | Uso |
-|---|---|
-| `feat:` | Nova funcionalidade |
-| `fix:` | Correcao de bug |
-| `chore:` | Tarefas de manutencao (deps, configs) |
+| Prefixo     | Uso                                   |
+| ----------- | ------------------------------------- |
+| `feat:`     | Nova funcionalidade                   |
+| `fix:`      | Correcao de bug                       |
+| `chore:`    | Tarefas de manutencao (deps, configs) |
 | `refactor:` | Refatoracao sem alterar comportamento |
-| `test:` | Adicao ou correcao de testes |
-| `docs:` | Documentacao |
-| `style:` | Formatacao, whitespace |
-| `perf:` | Melhoria de performance |
-| `ci:` | Configuracao de CI/CD |
+| `test:`     | Adicao ou correcao de testes          |
+| `docs:`     | Documentacao                          |
+| `style:`    | Formatacao, whitespace                |
+| `perf:`     | Melhoria de performance               |
+| `ci:`       | Configuracao de CI/CD                 |
 
 Exemplos:
 
@@ -452,8 +459,8 @@ docs: update architecture diagram
 
 ### Nomeacao de Branches
 
-| Tipo | Padrao | Exemplo |
-|---|---|---|
-| Feature | `feature/descricao-curta` | `feature/add-invoice-module` |
-| Correcao | `fix/descricao-curta` | `fix/tenant-filter-missing` |
-| Manutencao | `chore/descricao-curta` | `chore/upgrade-typeorm` |
+| Tipo       | Padrao                    | Exemplo                      |
+| ---------- | ------------------------- | ---------------------------- |
+| Feature    | `feature/descricao-curta` | `feature/add-invoice-module` |
+| Correcao   | `fix/descricao-curta`     | `fix/tenant-filter-missing`  |
+| Manutencao | `chore/descricao-curta`   | `chore/upgrade-typeorm`      |

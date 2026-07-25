@@ -11,10 +11,12 @@
 
 ## Checklist
 
-- [ ] `npm run lint` passa sem erros
+- [ ] `npm run lint:check` passa sem erros e sem warnings
+- [ ] `npm run format:check` passa
+- [ ] `npm run typecheck` passa
 - [ ] Testes unitarios adicionados/atualizados (`npm test`)
 - [ ] Testes e2e adicionados/atualizados (`npm run test:e2e`)
-- [ ] Migration gerada, se houve alteracao no banco (`npm run migration:generate`)
+- [ ] Migration gerada, se houve alteracao no banco (`npm run migration:generate -- src/database/migrations/NomeDaMigration`)
 - [ ] Endpoints documentados no Swagger (`@ApiOperation`, `@ApiResponse`)
 - [ ] Codigos de erro adicionados ao enum centralizado, se necessario
 - [ ] Queries filtram por `tenantId` corretamente

@@ -82,6 +82,7 @@ export class Sample {
 ```
 
 **Regras:**
+
 - Nenhum `import` de bibliotecas externas (NestJS, TypeORM, etc.)
 - O `id` recebe string vazia como default porque sera gerado pelo banco
 - O `tenantId` e obrigatorio para garantir multitenancy
@@ -106,13 +107,18 @@ export const SAMPLE_REPOSITORY = Symbol('SAMPLE_REPOSITORY');
 export interface SampleRepositoryPort {
   save(sample: Sample): Promise<Sample>;
   findById(id: string, tenantId: string): Promise<Sample | null>;
-  findAll(tenantId: string, page: number, perPage: number): Promise<[Sample[], number]>;
+  findAll(
+    tenantId: string,
+    page: number,
+    perPage: number,
+  ): Promise<[Sample[], number]>;
   update(sample: Sample): Promise<Sample>;
   softDelete(id: string, tenantId: string): Promise<void>;
 }
 ```
 
 **Regras:**
+
 - O Symbol e exportado como constante (UPPER_SNAKE_CASE)
 - Todos os metodos de leitura recebem `tenantId` como parametro para isolamento
 - `findAll` retorna uma tupla `[entidades[], total]` para paginacao
@@ -150,6 +156,7 @@ export class SampleDomainService {
 ```
 
 **Regras:**
+
 - Nenhuma dependencia de infraestrutura
 - Metodos estaticos e puros (sem estado)
 - Apenas logica de negocio que nao cabe em uma entidade isolada
@@ -205,6 +212,7 @@ export interface SampleResponseDto {
 ```
 
 **Regras:**
+
 - Schemas de criacao: todos os campos obrigatorios presentes
 - Schemas de atualizacao: todos os campos com `.optional()`
 - Schemas de query: campos como `string` (query params sao sempre string)
@@ -256,6 +264,7 @@ export class SampleMapper {
 ```
 
 **Regras:**
+
 - Metodos estaticos (a classe nao precisa ser instanciada)
 - `toResponse()` converte `Date` para `string` ISO
 - `toDomain()` recebe o `tenantId` como parametro separado (vem do contexto, nao do body)
@@ -288,7 +297,10 @@ export class CreateSampleUseCase {
     private readonly sampleRepo: SampleRepositoryPort,
   ) {}
 
-  async execute(dto: CreateSampleDto, tenantId: string): Promise<SampleResponseDto> {
+  async execute(
+    dto: CreateSampleDto,
+    tenantId: string,
+  ): Promise<SampleResponseDto> {
     const sample = SampleMapper.toDomain(dto, tenantId);
     const saved = await this.sampleRepo.save(sample);
     return SampleMapper.toResponse(saved);
@@ -327,7 +339,11 @@ export class ListSamplesUseCase {
     query: { page?: string; perPage?: string },
   ): Promise<PaginatedResponse<SampleResponseDto>> {
     const { page, perPage } = parsePaginationParams(query);
-    const [samples, total] = await this.sampleRepo.findAll(tenantId, page, perPage);
+    const [samples, total] = await this.sampleRepo.findAll(
+      tenantId,
+      page,
+      perPage,
+    );
 
     return {
       data: samples.map(SampleMapper.toResponse),
@@ -340,6 +356,7 @@ export class ListSamplesUseCase {
 ```
 
 **Regras:**
+
 - Cada use case e `@Injectable()` e recebe dependencias via `@Inject(SYMBOL)`
 - O metodo principal sempre se chama `execute()`
 - Use cases usam apenas ports (interfaces), nunca implementacoes concretas
@@ -404,6 +421,7 @@ export class SampleTypeormEntity {
 ```
 
 **Regras:**
+
 - Nome da tabela no plural e snake_case (`@Entity('samples')`)
 - PK sempre UUID (`@PrimaryGeneratedColumn('uuid')`)
 - Timestamps com `timestamptz`
@@ -502,6 +520,7 @@ export class SampleTypeormRepository implements SampleRepositoryPort {
 ```
 
 **Regras:**
+
 - Implementa a interface do port (`implements SampleRepositoryPort`)
 - Todas as queries filtram por `tenantId` para isolamento multi-tenant
 - Metodo privado `toDomain()` converte entidade TypeORM para entidade de dominio
@@ -521,17 +540,30 @@ Exemplo do `sample/`:
 ```typescript
 // src/sample/infrastructure/http/sample.controller.ts
 import {
-  Body, Controller, Delete, Get, HttpCode, HttpStatus,
-  Param, Patch, Post, Query, UsePipes,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UsePipes,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Roles, TenantId } from '../../../common/decorators';
 import { Role } from '../../../common/enums/role.enum';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import {
-  createSampleSchema, updateSampleSchema,
+  createSampleSchema,
+  updateSampleSchema,
 } from '../../application/dtos/sample.dto';
-import type { CreateSampleDto, UpdateSampleDto } from '../../application/dtos/sample.dto';
+import type {
+  CreateSampleDto,
+  UpdateSampleDto,
+} from '../../application/dtos/sample.dto';
 import { CreateSampleUseCase } from '../../application/use-cases/create-sample.use-case';
 import { GetSampleUseCase } from '../../application/use-cases/get-sample.use-case';
 import { ListSamplesUseCase } from '../../application/use-cases/list-samples.use-case';
@@ -554,10 +586,7 @@ export class SampleController {
   @HttpCode(HttpStatus.CREATED)
   @UsePipes(new ZodValidationPipe(createSampleSchema))
   @ApiOperation({ summary: 'Create a sample' })
-  async create(
-    @Body() dto: CreateSampleDto,
-    @TenantId() tenantId: string,
-  ) {
+  async create(@Body() dto: CreateSampleDto, @TenantId() tenantId: string) {
     const sample = await this.createSampleUseCase.execute(dto, tenantId);
     return { data: sample };
   }
@@ -574,10 +603,7 @@ export class SampleController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a sample by ID' })
-  async findOne(
-    @Param('id') id: string,
-    @TenantId() tenantId: string,
-  ) {
+  async findOne(@Param('id') id: string, @TenantId() tenantId: string) {
     const sample = await this.getSampleUseCase.execute(id, tenantId);
     return { data: sample };
   }
@@ -596,16 +622,14 @@ export class SampleController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Soft delete a sample' })
-  async remove(
-    @Param('id') id: string,
-    @TenantId() tenantId: string,
-  ) {
+  async remove(@Param('id') id: string, @TenantId() tenantId: string) {
     await this.deleteSampleUseCase.execute(id, tenantId);
   }
 }
 ```
 
 **Regras:**
+
 - Decorator `@ApiTags` para agrupamento no Swagger
 - Rotas versionadas: `v1/meu-modulo` (plural, kebab-case)
 - `@Roles()` no nivel da classe define quais roles podem acessar
@@ -660,6 +684,7 @@ export class SampleModule {}
 ```
 
 **Regras:**
+
 - `imports`: registrar a entidade TypeORM com `TypeOrmModule.forFeature()`
 - `providers`: fazer o binding do Symbol do port para a classe do adapter
 - `providers`: registrar todos os use cases
@@ -847,12 +872,20 @@ describe('SampleDomainService', () => {
 
   describe('canDeactivate', () => {
     it('deve permitir desativar sample ativo', () => {
-      const sample = new Sample({ tenantId: 't1', name: 'Test', isActive: true });
+      const sample = new Sample({
+        tenantId: 't1',
+        name: 'Test',
+        isActive: true,
+      });
       expect(SampleDomainService.canDeactivate(sample)).toBe(true);
     });
 
     it('nao deve permitir desativar sample ja inativo', () => {
-      const sample = new Sample({ tenantId: 't1', name: 'Test', isActive: false });
+      const sample = new Sample({
+        tenantId: 't1',
+        name: 'Test',
+        isActive: false,
+      });
       expect(SampleDomainService.canDeactivate(sample)).toBe(false);
     });
   });

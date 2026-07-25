@@ -18,6 +18,8 @@ cd nestjs-hexagonal-template
 npm install
 ```
 
+`npm install` (assim como `npm ci`) roda o script `prepare`, que instala o hook do husky. A partir dai, `.husky/pre-commit` executa o `lint-staged` a cada commit: `eslint --fix --max-warnings 0` e `prettier --write` sobre os arquivos em stage. O hook **nao** roda `typecheck` nem os testes -- esses continuam sendo responsabilidade sua antes de abrir o PR.
+
 ### 3. Criar uma Branch
 
 Crie uma branch a partir da `main` seguindo o padrao de nomeacao:
@@ -71,17 +73,17 @@ Todos os commits devem seguir o padrao [Conventional Commits](https://www.conven
 
 ### Tipos Permitidos
 
-| Tipo | Descricao |
-|---|---|
-| `feat` | Nova funcionalidade |
-| `fix` | Correcao de bug |
-| `chore` | Manutencao (deps, configs, scripts) |
+| Tipo       | Descricao                                |
+| ---------- | ---------------------------------------- |
+| `feat`     | Nova funcionalidade                      |
+| `fix`      | Correcao de bug                          |
+| `chore`    | Manutencao (deps, configs, scripts)      |
 | `refactor` | Refatoracao sem mudanca de comportamento |
-| `test` | Adicao ou correcao de testes |
-| `docs` | Alteracao em documentacao |
-| `style` | Formatacao, whitespace, ponto e virgula |
-| `perf` | Melhoria de performance |
-| `ci` | Configuracao de CI/CD |
+| `test`     | Adicao ou correcao de testes             |
+| `docs`     | Alteracao em documentacao                |
+| `style`    | Formatacao, whitespace, ponto e virgula  |
+| `perf`     | Melhoria de performance                  |
+| `ci`       | Configuracao de CI/CD                    |
 
 ### Exemplos
 
@@ -118,7 +120,7 @@ Execute as seguintes verificacoes localmente:
 npm run lint
 ```
 
-O ESLint deve passar sem erros. Warnings sao aceitaveis em casos justificados, mas devem ser minimizados.
+O ESLint deve passar sem erros **e sem warnings**: o hook de pre-commit (lint-staged) e o job `quality` do CI rodam com `--max-warnings 0`. Para reproduzir exatamente o gate do CI, use `npm run lint:check` (sem auto-fix).
 
 ### 2. Formatacao
 
@@ -126,9 +128,17 @@ O ESLint deve passar sem erros. Warnings sao aceitaveis em casos justificados, m
 npm run format
 ```
 
-O Prettier formata automaticamente o codigo. Certifique-se de que nao ha diferencas apos a formatacao.
+O Prettier formata automaticamente o codigo. Certifique-se de que nao ha diferencas apos a formatacao. O gate do CI e `npm run format:check`, que cobre `src/**/*.ts`, `test/**/*.ts`, `docs/**/*.md`, `.github/**/*.yml` e os arquivos de configuracao da raiz.
 
-### 3. Testes Unitarios
+### 3. Typecheck
+
+```bash
+npm run typecheck
+```
+
+`tsc --noEmit` sobre o projeto inteiro. E o unico gate do CI que nenhum outro comando cobre: `npm run build` usa `tsconfig.build.json` e o Jest tem `rootDir: src`, entao ambos ignoram `test/`.
+
+### 4. Testes Unitarios
 
 ```bash
 npm test
@@ -136,13 +146,13 @@ npm test
 
 Todos os testes devem passar. Se voce adicionou codigo novo, adicione testes correspondentes.
 
-### 4. Testes E2E (se aplicavel)
+### 5. Testes E2E (se aplicavel)
 
 ```bash
 npm run test:e2e
 ```
 
-### 5. Build
+### 6. Build
 
 ```bash
 npm run build
@@ -160,7 +170,7 @@ Ao abrir um PR, verifique os seguintes itens:
 - [ ] Commits seguem Conventional Commits
 - [ ] Codigo segue as convencoes do projeto (`docs/CONVENTIONS.md`)
 - [ ] Arquitetura hexagonal respeitada (regra de dependencia)
-- [ ] `npm run lint` passa sem erros
+- [ ] `npm run lint:check && npm run format:check && npm run typecheck` passam (mesmos gates do job `quality` do CI)
 - [ ] `npm run build` compila sem erros
 - [ ] Testes unitarios adicionados para codigo novo
 - [ ] `npm test` passa com todos os testes

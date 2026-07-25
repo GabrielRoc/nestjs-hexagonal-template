@@ -43,11 +43,11 @@ graph LR
 
 Each module is organized in three layers:
 
-| Layer              | Responsibility                              | Path                          |
-|--------------------|---------------------------------------------|-------------------------------|
-| **Domain**         | Entities, ports (interfaces), domain services | `domain/`                    |
-| **Application**    | Use cases, DTOs, mappers                    | `application/`                |
-| **Infrastructure** | Controllers, TypeORM repositories, HTTP      | `infrastructure/`            |
+| Layer              | Responsibility                                | Path              |
+| ------------------ | --------------------------------------------- | ----------------- |
+| **Domain**         | Entities, ports (interfaces), domain services | `domain/`         |
+| **Application**    | Use cases, DTOs, mappers                      | `application/`    |
+| **Infrastructure** | Controllers, TypeORM repositories, HTTP       | `infrastructure/` |
 
 For a detailed explanation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -89,15 +89,18 @@ src/
 
 ## Available Scripts
 
-| Script                | Description                                      |
-|-----------------------|--------------------------------------------------|
-| `npm run start:dev`   | Start the app in watch mode                      |
-| `npm run build`       | Compile the project                              |
-| `npm run lint`        | Run ESLint with auto-fix                         |
-| `npm test`            | Run unit tests                                   |
-| `npm run test:e2e`    | Run end-to-end tests                             |
-| `npm run migration:generate` | Generate a new TypeORM migration            |
-| `npm run migration:run`     | Run pending migrations                       |
+| Script                                                                | Description                                                          |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `npm run start:dev`                                                   | Start the app in watch mode                                          |
+| `npm run build`                                                       | Compile the project                                                  |
+| `npm run lint`                                                        | Run ESLint with auto-fix                                             |
+| `npm run lint:check`                                                  | ESLint without auto-fix, `--max-warnings 0` (CI gate)                |
+| `npm run format:check`                                                | Prettier in check mode, covers `docs/**/*.md` and `.github/**/*.yml` |
+| `npm run typecheck`                                                   | `tsc --noEmit` over the whole project, including `test/`             |
+| `npm test`                                                            | Run unit tests                                                       |
+| `npm run test:e2e`                                                    | Run end-to-end tests                                                 |
+| `npm run migration:generate -- src/database/migrations/MigrationName` | Generate a new TypeORM migration (the path is required)              |
+| `npm run migration:run`                                               | Run pending migrations                                               |
 
 ---
 
@@ -119,10 +122,10 @@ src/
 
 ## Documentation
 
-| Document                                              | Description                              |
-|-------------------------------------------------------|------------------------------------------|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md)               | Detailed architecture explanation        |
-| [CLAUDE.md](CLAUDE.md)                                | AI agent guide and project conventions   |
+| Document                                | Description                            |
+| --------------------------------------- | -------------------------------------- |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Detailed architecture explanation      |
+| [CLAUDE.md](CLAUDE.md)                  | AI agent guide and project conventions |
 
 ---
 
