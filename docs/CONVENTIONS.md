@@ -423,13 +423,17 @@ Declarar como `@Index(..., { where })` na entidade (em vez de escrever o indice
 so na migration) mantem entidade e banco em sincronia: o
 `migration:generate` gera o indice parcial sozinho e nao acusa diferenca depois.
 No template a regra se aplica a `app_tenants.document`,
-`users.supertokensUserId` e `users (tenantId, email)`. O bloco
+`users.supertokensUserId`, `users (tenantId, email)` e
+`tenant_features (tenantId, featureKey)` — neste ultimo o predicado tambem entra
+no `ON CONFLICT` do upsert de feature flags, que o Postgres recusa sem o
+`WHERE "deletedAt" IS NULL` correspondente. O bloco
 `schema criado pela migration` de `test/sample.e2e-spec.ts` trava esse
-comportamento contra um Postgres real, em oito testes: para **cada** um dos tres
-indices, o caso que deve falhar (duas linhas vivas com o mesmo valor) e o caso
-que deve passar (o mesmo valor depois do soft delete), mais o escopo por tenant
-do indice de e-mail e uma checagem de que a metadata das entidades e o schema da
-migration nao divergiram (um `migration:generate` agora nao emitiria nada). Sem
+comportamento contra um Postgres real, em oito testes: para cada um dos tres
+indices de `app_tenants`/`users`, o caso que deve falhar (duas linhas vivas com o
+mesmo valor) e o caso que deve passar (o mesmo valor depois do soft delete), mais
+o escopo por tenant do indice de e-mail e uma checagem de que a metadata das
+entidades e o schema da migration nao divergiram — e essa ultima cobre os quatro
+indices, porque um `migration:generate` agora nao emitiria nada. Sem
 esses dois casos, um indice novo e uma garantia que ninguem verifica — e o teste
 de indice sozinho nao ve a troca por `unique: true` feita **so** na entidade,
 porque ele roda contra o schema da migration.

@@ -23,6 +23,7 @@ import type {
 import { InitialSchema1784953438174 } from '../src/database/migrations/1784953438174-InitialSchema';
 import { AuditLogTypeormEntity } from '../src/audit-log/infrastructure/persistence/audit-log.typeorm-entity';
 import { TenantTypeormEntity } from '../src/tenant/infrastructure/persistence/tenant.typeorm-entity';
+import { TenantFeatureTypeormEntity } from '../src/tenant-feature/infrastructure/persistence/tenant-feature.typeorm-entity';
 import { UserTypeormEntity } from '../src/user/infrastructure/persistence/user.typeorm-entity';
 
 import { SampleTypeormEntity } from '../src/sample/infrastructure/persistence/sample.typeorm-entity';
@@ -254,8 +255,14 @@ interface ErrorBody {
       username: process.env.DB_USERNAME ?? 'postgres',
       password: process.env.DB_PASSWORD ?? 'postgres',
       database: DB_NAME,
+      // TODAS as entidades ORM do template, mesmo as que nenhum teste deste
+      // arquivo usa: e essa lista que o teste de sincronia compara com o schema
+      // da migration, entao entidade de fora e entidade cuja tabela pode faltar
+      // na migration sem ninguem perceber. Foi como `tenant_features` ficou fora
+      // da `InitialSchema`.
       entities: [
         TenantTypeormEntity,
+        TenantFeatureTypeormEntity,
         UserTypeormEntity,
         AuditLogTypeormEntity,
         SampleTypeormEntity,
