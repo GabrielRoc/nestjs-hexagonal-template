@@ -82,6 +82,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     // devolve a mensagem generica, como no ramo de excecao desconhecida.
     // Mensagens 4xx continuam passando intactas, pois sao para quem chamou.
     const isServerError = status >= 500;
+    if (isServerError) {
+      // details pode conter DSN, host interno, query com credencial. Fica fora
+      // do instanceof de proposito: qualquer caminho futuro que produza 5xx
+      // com details herda o mascaramento.
+      details = undefined;
+    }
     if (
       isServerError &&
       (exception instanceof HttpException ||

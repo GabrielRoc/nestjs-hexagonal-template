@@ -128,6 +128,42 @@ describe('GlobalExceptionFilter', () => {
     expect(logger).toHaveBeenCalled();
   });
 
+  it('nao vaza details em DomainException 5xx', () => {
+    jest.spyOn(filter['logger'], 'error').mockImplementation(() => undefined);
+    filter.catch(
+      new DomainException(
+        'DB_ERROR',
+        'falha',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        {
+          query: 'SELECT * FROM users WHERE token = ...',
+        },
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+    expect(json).toHaveBeenCalledWith({
+      error: { code: 'DB_ERROR', message: 'Erro interno do servidor' },
+    });
+  });
+
+  it('nao vaza details em HttpException 5xx', () => {
+    jest.spyOn(filter['logger'], 'error').mockImplementation(() => undefined);
+    filter.catch(
+      new InternalServerErrorException({
+        message: 'x',
+        details: { host: '10.0.0.5' },
+      }),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+    expect(json).toHaveBeenCalledWith({
+      error: { code: 'HTTP_500', message: 'Erro interno do servidor' },
+    });
+  });
+
   it('mantem o code da DomainException', () => {
     filter.catch(
       new DomainException(
