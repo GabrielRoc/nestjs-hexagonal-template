@@ -42,11 +42,22 @@ describe('RealtimeService', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('nao entrega o evento de um tenant na sala de outro', () => {
+  it('usa uma sala por tenant, sem vazar entre eles', () => {
     service.setServer({ to } as unknown as Namespace);
 
-    service.emit('tenant-1', 'sample.created', { id: 'x' });
+    service.emit('tenant-1', 'sample.created', { id: 'a' });
+    service.emit('tenant-2', 'sample.created', { id: 'b' });
 
-    expect(to).not.toHaveBeenCalledWith(tenantRoom('tenant-2'));
+    // Assercoes positivas: se `emit` virar no-op, estas quebram (uma assercao
+    // apenas negativa passaria com a implementacao morta).
+    expect(to.mock.calls).toEqual([
+      [tenantRoom('tenant-1')],
+      [tenantRoom('tenant-2')],
+    ]);
+    expect(emit.mock.calls).toEqual([
+      ['sample.created', { id: 'a' }],
+      ['sample.created', { id: 'b' }],
+    ]);
+    expect(tenantRoom('tenant-1')).not.toBe(tenantRoom('tenant-2'));
   });
 });
