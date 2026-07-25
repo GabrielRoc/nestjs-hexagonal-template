@@ -89,18 +89,21 @@ isolado por tenant. Nao segue as tres camadas hexagonais: e infraestrutura, como
 
 ## Convencoes Obrigatorias
 
-| Aspecto         | Regra                                                               |
-| --------------- | ------------------------------------------------------------------- |
-| Idioma codigo   | Ingles para codigo, portugues para mensagens de usuario             |
-| Rotas           | kebab-case, plural (`/api/v1/audit-logs`)                           |
-| IDs             | UUID v4                                                             |
-| Datas           | ISO 8601 (`2024-01-15T10:30:00Z`)                                   |
-| Moeda           | Inteiro em centavos (`1999` = R$ 19,99)                             |
-| Soft delete     | Campo `deletedAt` (nullable timestamp), nunca DELETE fisico         |
-| Respostas       | Envelope `{ data }` sempre; `{ data, meta.pagination }` para listas |
-| Codigos de erro | Enum centralizado em `src/common/enums/error-codes.enum.ts`         |
-| Multi-tenancy   | Todo recurso possui `tenantId`; filtrar sempre nas queries          |
-| Controllers     | Apenas validam entrada (Zod) e delegam ao use case                  |
+| Aspecto              | Regra                                                               |
+| -------------------- | ------------------------------------------------------------------- |
+| Idioma codigo        | Ingles para codigo, portugues para mensagens de usuario             |
+| Rotas                | kebab-case, plural (`/api/v1/audit-logs`)                           |
+| IDs                  | UUID v4                                                             |
+| Datas                | ISO 8601 (`2024-01-15T10:30:00Z`)                                   |
+| Moeda                | Inteiro em centavos (`1999` = R$ 19,99)                             |
+| Soft delete          | Campo `deletedAt` (nullable timestamp), nunca DELETE fisico         |
+| Respostas            | Envelope `{ data }` sempre; `{ data, meta.pagination }` para listas |
+| Codigos de erro      | Enum centralizado em `src/common/enums/error-codes.enum.ts`         |
+| Multi-tenancy        | Todo recurso possui `tenantId`; filtrar sempre nas queries          |
+| Controllers          | Apenas validam entrada (Zod) e delegam ao use case                  |
+| Validacao            | `@Body(new ZodValidationPipe(schema))`; **nunca** `@UsePipes(...)`  |
+| Autorizacao          | `@Roles(...)` por rota; **nunca** na classe                         |
+| Unique + soft delete | Indice parcial `WHERE "deletedAt" IS NULL`                          |
 
 ---
 
@@ -165,20 +168,70 @@ export class SampleMapper {
 }
 ```
 
-### Schemas de validacao
+### Schemas de validacao e classes Swagger
 
-Zod schemas ficam em `application/dtos/`:
+O arquivo de DTO carrega os schemas Zod (validacao em runtime) **e** as classes
+Swagger (contrato publicado) juntos, em blocos separados por comentario: quando
+um campo muda, os dois estao na mesma tela. Referencia:
+`src/sample/application/dtos/sample.dto.ts`.
 
 ```typescript
+import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
 export const createSampleSchema = z.object({
-  name: z.string().min(1).max(255),
-  description: z.string().optional(),
+  name: z.string().min(2).max(255),
+  description: z.string().max(1000).optional(),
 });
 
 export type CreateSampleDto = z.infer<typeof createSampleSchema>;
+
+export class CreateSampleSwagger {
+  @ApiProperty({ example: 'Primeiro registro', minLength: 2, maxLength: 255 })
+  name!: string;
+}
+
+// Respostas declaram o ENVELOPE, nunca a entidade solta: `type: SampleSwagger`
+// direto publica um contrato que a API nao cumpre.
+export class SampleResponseSwagger {
+  @ApiProperty({ type: SampleSwagger })
+  data!: SampleSwagger;
+}
 ```
+
+### Controllers
+
+```typescript
+@ApiTags('Samples')
+@ApiCookieAuth()
+@Controller('v1/samples')
+export class SampleController {
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @Roles(Role.ADMIN) // por rota, nunca na classe
+  @ApiOperation({ summary: 'Create a sample' })
+  @ApiBody({ type: CreateSampleSwagger })
+  @ApiResponse({ status: 201, type: SampleResponseSwagger })
+  @ApiResponse({ status: 400, type: ErrorResponseSwagger })
+  async create(
+    @Body(new ZodValidationPipe(createSampleSchema)) dto: CreateSampleDto,
+    @TenantId() tenantId: string,
+  ) {
+    return { data: await this.createSampleUseCase.execute(dto, tenantId) };
+  }
+}
+```
+
+Duas proibicoes, as duas por bug real e nao por estilo:
+
+- **Nunca `@UsePipes(new ZodValidationPipe(schema))`.** O `@UsePipes` aplica o
+  pipe a **todos** os argumentos do handler — `@Param`, `@Query`, `@TenantId`,
+  `@CurrentUser`. A string do id/tenant e validada contra o schema de objeto do
+  body e a rota responde **400 sempre**. `test/sample.e2e-spec.ts` tem o teste de
+  regressao ("regressao do @UsePipes").
+- **Nunca `@Roles(...)` na classe.** Na classe, leitura e escrita compartilham
+  permissao: quem pode listar passa a poder apagar. Leitura costuma ser
+  `ADMIN, USER`; escrita, `ADMIN`.
 
 ### Entidades TypeORM
 
@@ -186,6 +239,8 @@ Entidades ORM ficam em `infrastructure/persistence/` e representam a tabela no b
 
 ```typescript
 @Entity('samples')
+// Indice composto sempre comecando por tenantId
+@Index(['tenantId', 'name'])
 export class SampleOrmEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -197,6 +252,16 @@ export class SampleOrmEntity {
   deletedAt: Date | null;
 }
 ```
+
+Unicidade em tabela com soft delete e **indice parcial**, nunca `unique: true`:
+
+```typescript
+@Index(['document'], { unique: true, where: '"deletedAt" IS NULL' })
+```
+
+Com um unique comum, a linha soft-deletada continua ocupando o valor e bloqueia
+para sempre o recadastro do mesmo documento/e-mail. Detalhes e a lista dos
+indices do template em `docs/CONVENTIONS.md`.
 
 ### Filas (BullMQ)
 
@@ -246,6 +311,67 @@ Regras obrigatorias:
 
 O shutdown ja e coberto: o `@nestjs/bullmq` fecha workers e queues no
 `onApplicationShutdown` e o `main.ts` chama `app.enableShutdownHooks()`.
+---
+
+## Convencoes de teste
+
+Testes sao lidos como documentacao: cada `it` deve ensinar algo que o leitor
+precisa saber (isolamento entre tenants, not-found, soft delete, conta de
+paginacao). Referencias: `src/sample/application/use-cases/*.spec.ts`,
+`src/common/filters/global-exception.filter.spec.ts`, `test/sample.e2e-spec.ts`.
+
+**As seis regras — obrigatorias:**
+
+1. **Instanciar com `new`, sem `Test.createTestingModule`.** Um use case recebe
+   ports pelo construtor; montar o container do Nest so deixa o teste lento e
+   acoplado ao wiring do modulo. Reserve `Test.createTestingModule` para o e2e,
+   onde o objetivo e justamente o app montado.
+2. **Mockar so o que e usado, via `jest.Mocked<Pick<Port, 'x' | 'y'>>`.** Se o
+   use case passar a chamar um metodo novo, o teste deixa de **compilar** — em
+   vez de estourar `undefined is not a function` em runtime. Mockar o port
+   inteiro esconde essa mudanca.
+3. **Fabrica com overrides `Partial<Entity>`** (`test/factories/`). Cada teste
+   sobrescreve apenas o campo de que a assercao depende — o resto vem do padrao,
+   com datas fixas e nunca `new Date()`.
+4. **Assercao de falha em `code` + `httpStatus`, nunca no texto da mensagem.** A
+   mensagem e em portugues, para o usuario, e sera reescrita; o `code` e o
+   contrato:
+   ```typescript
+   await expect(useCase.execute(id, tenantId)).rejects.toMatchObject({
+     code: ErrorCode.SAMPLE_NOT_FOUND,
+     httpStatus: HttpStatus.NOT_FOUND,
+   });
+   ```
+5. **Assertar o negativo** e `jest.restoreAllMocks()` no `afterEach`. Sem
+   `expect(repo.save).not.toHaveBeenCalled()` o teste nao distingue "recusou
+   antes de gravar" de "gravou e depois reclamou".
+6. **Spec ao lado do arquivo testado**, mesmo diretorio e mesmo nome com
+   `.spec.ts` (`create-sample.use-case.ts` -> `create-sample.use-case.spec.ts`).
+   Sem pasta `__tests__/`: com o spec ao lado, mover ou apagar o fonte leva o
+   teste junto e o import e sempre `./arquivo`. Em `test/` ficam **somente** as
+   fabricas (`test/factories/`) e os e2e (`test/*.e2e-spec.ts`), que nao
+   pertencem a nenhum diretorio de fonte. O `testRegex` do Jest (`.*\.spec\.ts$`)
+   aceita as duas formas, entao ninguem vai ser avisado por uma falha: a regra
+   esta escrita aqui justamente por isso.
+
+**Testes e2e** (`test/*.e2e-spec.ts`) rodam contra um Postgres real com o schema
+criado pela migration (`dropSchema` + `migrationsRun`) — se a migration quebrar,
+o e2e nao sobe. O banco tem de terminar em `_test` (o harness recusa outro nome);
+o `docker-compose.yml` cria `template_db_test` no primeiro boot do volume. O que
+o e2e cobre e o que ele **nao** cobre esta no cabecalho de
+`test/sample.e2e-spec.ts` — leia antes de confiar na cobertura.
+
+**Duas decisoes de configuracao, para nao serem revertidas por engano:**
+
+- `npm test` **nao** usa `--passWithNoTests`. Com a flag, uma falha de descoberta
+  (mudanca em `rootDir`/`testRegex`, specs movidos) faz o Jest imprimir
+  `No tests found, exiting with code 0` e o CI fica verde sem rodar teste nenhum.
+- **Nao ha `coverageThreshold`.** O numero global do template nao mede o que
+  parece medir e um limite ou reprova o clone no primeiro dia ou nao trava nada.
+  Quando o projeto tiver modulos reais, configure um limite **por diretorio**
+  (ex.: `application/use-cases/`) em vez de um global. O `collectCoverageFrom` do
+  `package.json` ja exclui wiring (modules, DTOs, classes Swagger, entidades ORM,
+  `main.ts`, config, migrations) para o relatorio ser informativo.
 
 ---
 
@@ -347,8 +473,9 @@ o `TurnstileGuard` das rotas de auth so exige captcha quando
 | `npm run lint:check`                                                    | ESLint sem auto-fix, `--max-warnings 0` (gate do CI)               |
 | `npm run format:check`                                                  | Prettier em modo check, inclui `docs/**/*.md` e `.github/**/*.yml` |
 | `npm run typecheck`                                                     | `tsc --noEmit` sobre o projeto inteiro, incluindo `test/`          |
-| `npm test`                                                              | Executa testes unitarios                                           |
-| `npm run test:e2e`                                                      | Executa testes end-to-end                                          |
+| `npm test`                                                              | Executa testes unitarios (sem `--passWithNoTests`, de proposito)   |
+| `npm run test:cov`                                                      | Cobertura (informativa; nao ha `coverageThreshold`)                |
+| `npm run test:e2e`                                                      | E2E contra Postgres; exige `DB_DATABASE` terminando em `_test`     |
 | `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gera nova migration TypeORM (o path e obrigatorio)                 |
 | `npm run migration:run`                                                 | Executa migrations pendentes                                       |
 
@@ -358,14 +485,17 @@ o `TurnstileGuard` das rotas de auth so exige captcha quando
 
 1. Criar entidade de dominio em `domain/entities/`
 2. Definir port (interface) em `domain/ports/`
-3. Criar Zod schema e DTO em `application/dtos/`
+3. Criar Zod schema, DTO e classes Swagger em `application/dtos/` (mesmo arquivo)
 4. Implementar mapper em `application/mappers/`
 5. Implementar use case em `application/use-cases/`
 6. Criar entidade ORM em `infrastructure/persistence/`
 7. Implementar repositorio em `infrastructure/persistence/`
 8. Criar controller em `infrastructure/http/`
 9. Registrar providers no modulo (bind Symbol token ao repositorio concreto)
-10. Gerar migration (`npm run migration:generate -- src/database/migrations/NomeDaMigration`)
-11. Adicionar testes unitarios para o use case
-12. Adicionar testes e2e para o controller
-13. Documentar endpoints no Swagger (decorators `@ApiOperation`, `@ApiResponse`)
+10. Gerar migration (`npm run migration:generate -- src/database/migrations/NomeDaMigration`;
+    exige um Postgres de pe — o comando compara a metadata com o schema real)
+11. Adicionar testes unitarios para o use case (ver "Convencoes de teste")
+12. Adicionar testes e2e para o controller, cobrindo isolamento entre tenants e o
+    papel exigido em cada rota
+13. Documentar endpoints no Swagger (`@ApiOperation`, `@ApiParam`/`@ApiQuery`,
+    `@ApiBody`, um `@ApiResponse` por status, erros com `ErrorResponseSwagger`)

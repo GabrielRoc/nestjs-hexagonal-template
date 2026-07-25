@@ -278,20 +278,29 @@ export type CreateSampleDto = z.infer<typeof createSampleSchema>;
 
 ### ZodValidationPipe no Controller
 
-A validacao e aplicada via pipe no controller, seja no metodo inteiro ou em parametros individuais:
+A validacao e aplicada **sempre no parametro**, nunca com `@UsePipes`:
 
 ```typescript
-// Validacao no metodo inteiro (body)
 @Post()
-@UsePipes(new ZodValidationPipe(createSampleSchema))
-async create(@Body() dto: CreateSampleDto) {}
+async create(
+  @Body(new ZodValidationPipe(createSampleSchema)) dto: CreateSampleDto,
+  @TenantId() tenantId: string,
+) {}
 
-// Validacao em parametro individual
 @Patch(':id')
 async update(
+  @Param('id') id: string,
   @Body(new ZodValidationPipe(updateSampleSchema)) dto: UpdateSampleDto,
 ) {}
 ```
+
+**Nunca `@UsePipes(new ZodValidationPipe(schema))`.** O `@UsePipes` no metodo
+aplica o pipe a **todos** os argumentos do handler — `@Param`, `@Query`,
+`@TenantId`, `@CurrentUser`. A string do id (ou do tenant) e validada contra o
+schema de objeto do body e a rota passa a responder **400 sempre**. Nao e um
+risco futuro: e o que acontece na primeira vez que a rota ganha qualquer
+parametro alem do body. Exemplo correto e comentado em
+`src/sample/infrastructure/http/sample.controller.ts`.
 
 ### Validacao de CPF e CNPJ
 
@@ -370,6 +379,54 @@ export class SampleTypeormEntity {
   // ...
 }
 ```
+
+### Unique + Soft Delete: sempre indice parcial
+
+Toda restricao de unicidade em tabela com `deletedAt` precisa ser um **indice
+parcial** com `WHERE "deletedAt" IS NULL`:
+
+```typescript
+// ERRADO: `unique: true` cria um unique comum, que conta a linha soft-deletada
+@Column({ type: 'varchar', length: 18, unique: true })
+document!: string;
+
+// CERTO: o unique so vale entre as linhas vivas
+@Entity('app_tenants')
+@Index(['document'], { unique: true, where: '"deletedAt" IS NULL' })
+export class TenantTypeormEntity {
+  @Column({ type: 'varchar', length: 18 })
+  document!: string;
+}
+```
+
+Com um unique comum, um registro soft-deletado continua ocupando o valor e
+**bloqueia para sempre** o recadastro do mesmo documento/e-mail — a operacao de
+"apagar e cadastrar de novo" fica impossivel e o erro chega ao usuario como um
+conflito sem explicacao.
+
+Declarar como `@Index(..., { where })` na entidade (em vez de escrever o indice
+so na migration) mantem entidade e banco em sincronia: o
+`migration:generate` gera o indice parcial sozinho e nao acusa diferenca depois.
+No template a regra se aplica a `app_tenants.document`,
+`users.supertokensUserId` e `users (tenantId, email)`. O bloco
+`schema criado pela migration` de `test/sample.e2e-spec.ts` trava esse
+comportamento contra um Postgres real, em oito testes: para **cada** um dos tres
+indices, o caso que deve falhar (duas linhas vivas com o mesmo valor) e o caso
+que deve passar (o mesmo valor depois do soft delete), mais o escopo por tenant
+do indice de e-mail e uma checagem de que a metadata das entidades e o schema da
+migration nao divergiram (um `migration:generate` agora nao emitiria nada). Sem
+esses dois casos, um indice novo e uma garantia que ninguem verifica — e o teste
+de indice sozinho nao ve a troca por `unique: true` feita **so** na entidade,
+porque ele roda contra o schema da migration.
+
+### Nome da tabela de tenants: `app_tenants`
+
+A tabela e `app_tenants`, nao `tenants`. O SuperTokens self-hosted aponta para o
+**mesmo banco** da aplicacao (ver `docker-compose.yml`) e cria a sua propria
+`public.tenants` (`app_id`, `tenant_id`) no primeiro boot. Um `tenants` da
+aplicacao colide com ela. O mesmo cuidado vale para qualquer tabela nova: o
+SuperTokens tambem ocupa `roles`, `user_roles`, `apps`, `session_info`,
+`key_value`, entre outras.
 
 ### Relacoes com Tenant
 

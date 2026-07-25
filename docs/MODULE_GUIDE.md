@@ -175,33 +175,33 @@ Os DTOs sao definidos como schemas Zod, servindo como fonte unica de verdade par
 
 Exemplo do `sample/`:
 
+O arquivo carrega **os schemas Zod e as classes Swagger juntos**: quando um campo
+muda, os dois estao na mesma tela e ninguem esquece o outro.
+
 ```typescript
 // src/sample/application/dtos/sample.dto.ts
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { z } from 'zod';
+import { PaginationMetaSwagger } from '../../../common/swagger/common.swagger';
 
-// Schema de criacao
+// --- Schemas Zod: fonte unica de verdade da validacao ---
+
 export const createSampleSchema = z.object({
   name: z.string().min(2).max(255),
   description: z.string().max(1000).optional(),
+  sortOrder: z.number().int().min(0).optional(),
 });
 
-// Schema de atualizacao (todos os campos opcionais)
+// Atualizacao: todos os campos opcionais
 export const updateSampleSchema = z.object({
   name: z.string().min(2).max(255).optional(),
   description: z.string().max(1000).optional().nullable(),
   isActive: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).optional(),
 });
 
-// Schema de query para listagem
-export const listSamplesQuerySchema = z.object({
-  page: z.string().optional().default('1'),
-  perPage: z.string().optional().default('20'),
-});
-
-// Tipos inferidos dos schemas
 export type CreateSampleDto = z.infer<typeof createSampleSchema>;
 export type UpdateSampleDto = z.infer<typeof updateSampleSchema>;
-export type ListSamplesQuery = z.infer<typeof listSamplesQuerySchema>;
 
 // Interface de resposta (manual, pois datas sao convertidas para string)
 export interface SampleResponseDto {
@@ -210,8 +210,46 @@ export interface SampleResponseDto {
   name: string;
   description: string | null;
   isActive: boolean;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
+}
+
+// --- Classes Swagger: o @nestjs/swagger nao sabe ler um ZodType ---
+
+export class CreateSampleSwagger {
+  @ApiProperty({ example: 'Primeiro registro', minLength: 2, maxLength: 255 })
+  name!: string;
+
+  @ApiPropertyOptional({ example: 'Descricao livre', maxLength: 1000 })
+  description?: string;
+}
+
+export class SampleSwagger {
+  @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
+  id!: string;
+
+  // ... um @ApiProperty por campo do SampleResponseDto
+}
+
+// Respostas declaradas COM o envelope: anotar `type: SampleSwagger` direto
+// publica um contrato que a API nao cumpre e gera cliente quebrado.
+export class SampleResponseSwagger {
+  @ApiProperty({ type: SampleSwagger })
+  data!: SampleSwagger;
+}
+
+export class SampleListMetaSwagger {
+  @ApiProperty({ type: PaginationMetaSwagger })
+  pagination!: PaginationMetaSwagger;
+}
+
+export class SampleListResponseSwagger {
+  @ApiProperty({ type: [SampleSwagger] })
+  data!: SampleSwagger[];
+
+  @ApiProperty({ type: SampleListMetaSwagger })
+  meta!: SampleListMetaSwagger;
 }
 ```
 
@@ -219,9 +257,16 @@ export interface SampleResponseDto {
 
 - Schemas de criacao: todos os campos obrigatorios presentes
 - Schemas de atualizacao: todos os campos com `.optional()`
-- Schemas de query: campos como `string` (query params sao sempre string)
+- Zod e Swagger no mesmo arquivo, em blocos separados por comentario
+- Classes de resposta declaram o **envelope** (`{ data }` / `{ data, meta }`) e
+  reaproveitam `PaginationMetaSwagger`/`ErrorResponseSwagger` de
+  `src/common/swagger/`
 - O `ResponseDto` e uma interface separada porque datas sao serializadas como ISO string
 - Tipos sao inferidos com `z.infer<>` -- nunca duplicar manualmente
+- Nao deixe schema sem uso no arquivo: se nenhum controller o aplica, ele so
+  mente sobre o que e validado
+
+Arquivo completo: `src/sample/application/dtos/sample.dto.ts`.
 
 ---
 
@@ -554,9 +599,15 @@ import {
   Patch,
   Post,
   Query,
-  UsePipes,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+  ApiParam,
+  ApiCookieAuth,
+} from '@nestjs/swagger';
 import { Roles, TenantId } from '../../../common/decorators';
 import { Role } from '../../../common/enums/role.enum';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
@@ -575,8 +626,8 @@ import { UpdateSampleUseCase } from '../../application/use-cases/update-sample.u
 import { DeleteSampleUseCase } from '../../application/use-cases/delete-sample.use-case';
 
 @ApiTags('Samples')
+@ApiCookieAuth()
 @Controller('v1/samples')
-@Roles(Role.ADMIN, Role.USER)
 export class SampleController {
   constructor(
     private readonly createSampleUseCase: CreateSampleUseCase,
@@ -588,15 +639,23 @@ export class SampleController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @UsePipes(new ZodValidationPipe(createSampleSchema))
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Create a sample' })
-  async create(@Body() dto: CreateSampleDto, @TenantId() tenantId: string) {
+  @ApiBody({ type: CreateSampleSwagger })
+  @ApiResponse({ status: 201, type: SampleResponseSwagger })
+  @ApiResponse({ status: 400, type: ErrorResponseSwagger })
+  async create(
+    @Body(new ZodValidationPipe(createSampleSchema)) dto: CreateSampleDto,
+    @TenantId() tenantId: string,
+  ) {
     const sample = await this.createSampleUseCase.execute(dto, tenantId);
     return { data: sample };
   }
 
   @Get()
+  @Roles(Role.ADMIN, Role.USER)
   @ApiOperation({ summary: 'List samples (paginated)' })
+  @ApiResponse({ status: 200, type: SampleListResponseSwagger })
   async list(
     @TenantId() tenantId: string,
     @Query('page') page?: string,
@@ -606,14 +665,23 @@ export class SampleController {
   }
 
   @Get(':id')
+  @Roles(Role.ADMIN, Role.USER)
   @ApiOperation({ summary: 'Get a sample by ID' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, type: SampleResponseSwagger })
+  @ApiResponse({ status: 404, type: ErrorResponseSwagger })
   async findOne(@Param('id') id: string, @TenantId() tenantId: string) {
     const sample = await this.getSampleUseCase.execute(id, tenantId);
     return { data: sample };
   }
 
   @Patch(':id')
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Update a sample' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiBody({ type: UpdateSampleSwagger })
+  @ApiResponse({ status: 200, type: SampleResponseSwagger })
+  @ApiResponse({ status: 404, type: ErrorResponseSwagger })
   async update(
     @Param('id') id: string,
     @TenantId() tenantId: string,
@@ -625,7 +693,11 @@ export class SampleController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Soft delete a sample' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiResponse({ status: 204, description: 'Sample removido (soft delete)' })
+  @ApiResponse({ status: 404, type: ErrorResponseSwagger })
   async remove(@Param('id') id: string, @TenantId() tenantId: string) {
     await this.deleteSampleUseCase.execute(id, tenantId);
   }
@@ -636,11 +708,23 @@ export class SampleController {
 
 - Decorator `@ApiTags` para agrupamento no Swagger
 - Rotas versionadas: `v1/meu-modulo` (plural, kebab-case)
-- `@Roles()` no nivel da classe define quais roles podem acessar
+- **`@Roles()` por rota, nunca na classe.** Na classe, leitura e escrita
+  compartilham permissao: quem pode listar passa a poder apagar. Leitura costuma
+  ser `ADMIN, USER`; escrita, `ADMIN`.
 - `@TenantId()` extrai o tenantId do contexto da requisicao
-- `@UsePipes(new ZodValidationPipe(schema))` para validacao do body
+- **`@Body(new ZodValidationPipe(schema))`, nunca `@UsePipes(...)`.** O
+  `@UsePipes` aplica o pipe a todos os argumentos do handler (`@Param`,
+  `@Query`, `@TenantId`): a string do id vai para o schema de objeto do body e a
+  rota responde 400 sempre.
+- Swagger completo: `@ApiOperation`, `@ApiParam`/`@ApiQuery`, `@ApiBody` e um
+  `@ApiResponse` por status possivel. Os tipos de sucesso declaram o envelope
+  (`SampleResponseSwagger` = `{ data }`), os de erro usam o
+  `ErrorResponseSwagger` de `src/common/swagger/`.
 - Resposta singular retorna `{ data: T }`
 - DELETE retorna `204 No Content`
+
+O controller completo e comentado esta em
+`src/sample/infrastructure/http/sample.controller.ts`.
 
 ---
 
@@ -776,56 +860,94 @@ if (!entity) {
 
 ## Passo 14: Exemplos de Testes
 
+As seis regras do padrao de teste do template estao em `CLAUDE.md`
+("Convencoes de teste") — inclusive a de localizacao: o spec fica **ao lado** do
+arquivo testado, sem pasta `__tests__/`, e `test/` guarda so as fabricas e os
+e2e. Os arquivos de referencia:
+
+| Arquivo                                              | Demonstra                 |
+| ---------------------------------------------------- | ------------------------- |
+| `src/sample/application/use-cases/*.spec.ts`         | use case com port mockado |
+| `src/common/filters/global-exception.filter.spec.ts` | classe sem DI             |
+| `test/factories/sample.factory.ts`                   | fabrica de entidade       |
+| `test/sample.e2e-spec.ts`                            | e2e com Postgres real     |
+
 ### Teste Unitario do Use Case
 
 ```typescript
-// src/sample/application/use-cases/__tests__/create-sample.use-case.spec.ts
-import { CreateSampleUseCase } from '../create-sample.use-case';
-import type { SampleRepositoryPort } from '../../../domain/ports/sample.repository.port';
-import { Sample } from '../../../domain/entities/sample.entity';
+// src/sample/application/use-cases/create-sample.use-case.spec.ts
+import { TENANT_A } from '../../../../test/factories/sample.factory';
+import type { SampleRepositoryPort } from '../../domain/ports/sample.repository.port';
+import { CreateSampleUseCase } from './create-sample.use-case';
 
 describe('CreateSampleUseCase', () => {
+  // Pick: o mock declara SO os metodos que este use case chama. Se ele passar a
+  // chamar um metodo novo, o teste deixa de compilar em vez de estourar
+  // `undefined is not a function` em runtime.
+  let repo: jest.Mocked<Pick<SampleRepositoryPort, 'save' | 'getMaxSortOrder'>>;
   let useCase: CreateSampleUseCase;
-  let mockRepo: jest.Mocked<SampleRepositoryPort>;
 
   beforeEach(() => {
-    mockRepo = {
-      save: jest.fn(),
-      findById: jest.fn(),
-      findAll: jest.fn(),
-      update: jest.fn(),
-      softDelete: jest.fn(),
-    };
-    useCase = new CreateSampleUseCase(mockRepo);
+    repo = { save: jest.fn(), getMaxSortOrder: jest.fn() };
+    // `new`, sem Test.createTestingModule: o use case nao depende do container.
+    useCase = new CreateSampleUseCase(repo as unknown as SampleRepositoryPort);
   });
 
-  it('deve criar um sample com sucesso', async () => {
-    const dto = { name: 'Test Sample', description: 'Descricao' };
-    const tenantId = 'tenant-123';
-
-    const savedSample = new Sample({
-      id: 'uuid-123',
-      tenantId,
-      name: dto.name,
-      description: dto.description,
-    });
-
-    mockRepo.save.mockResolvedValue(savedSample);
-
-    const result = await useCase.execute(dto, tenantId);
-
-    expect(result.name).toBe('Test Sample');
-    expect(result.tenantId).toBe(tenantId);
-    expect(mockRepo.save).toHaveBeenCalledTimes(1);
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
+
+  it('grava o sample no tenant recebido', async () => {
+    repo.getMaxSortOrder.mockResolvedValue(-1);
+    repo.save.mockImplementation((sample) => Promise.resolve(sample));
+
+    await useCase.execute({ name: 'Novo' }, TENANT_A);
+
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: TENANT_A, name: 'Novo' }),
+    );
+  });
+
+  it('respeita o sortOrder explicito e nao consulta o maximo', async () => {
+    repo.save.mockImplementation((sample) => Promise.resolve(sample));
+
+    const result = await useCase.execute(
+      { name: 'Fixo', sortOrder: 3 },
+      TENANT_A,
+    );
+
+    expect(result.sortOrder).toBe(3);
+    // Assercao negativa: sem ela o teste nao prova que o round-trip extra no
+    // banco foi evitado.
+    expect(repo.getMaxSortOrder).not.toHaveBeenCalled();
+  });
+});
+```
+
+O caminho de erro segue o mesmo formato — assercao em `code` + `httpStatus`, mais
+o negativo (ver `update-sample.use-case.spec.ts`):
+
+```typescript
+it('devolve SAMPLE_NOT_FOUND com 404 e nao grava nada', async () => {
+  repo.findById.mockResolvedValue(null);
+
+  await expect(
+    useCase.execute(SAMPLE_ID, TENANT_A, { name: 'Novo' }),
+  ).rejects.toMatchObject({
+    code: ErrorCode.SAMPLE_NOT_FOUND,
+    httpStatus: HttpStatus.NOT_FOUND,
+  });
+  // Sem esta linha o teste nao distingue "recusou antes de gravar" de
+  // "gravou e depois reclamou".
+  expect(repo.update).not.toHaveBeenCalled();
 });
 ```
 
 ### Teste da Entidade de Dominio
 
 ```typescript
-// src/sample/domain/entities/__tests__/sample.entity.spec.ts
-import { Sample } from '../sample.entity';
+// src/sample/domain/entities/sample.entity.spec.ts
+import { Sample } from './sample.entity';
 
 describe('Sample Entity', () => {
   it('deve criar com valores padrao', () => {
@@ -859,9 +981,9 @@ describe('Sample Entity', () => {
 ### Teste do Domain Service
 
 ```typescript
-// src/sample/domain/services/__tests__/sample-domain.service.spec.ts
-import { SampleDomainService } from '../sample-domain.service';
-import { Sample } from '../../entities/sample.entity';
+// src/sample/domain/services/sample-domain.service.spec.ts
+import { SampleDomainService } from './sample-domain.service';
+import { Sample } from '../entities/sample.entity';
 
 describe('SampleDomainService', () => {
   describe('validateName', () => {
@@ -1139,3 +1261,6 @@ it('propaga falha de persistencia para o BullMQ reagendar', async () => {
 - [ ] Fila declarada (se necessario): port, constantes, adapter e processor em
       `infrastructure/queue/`
 - [ ] Testes unitarios escritos para use cases, domain services e processors
+      (padrao em `CLAUDE.md`, secao "Convencoes de teste")
+- [ ] Rotas cobertas no e2e (`test/*.e2e-spec.ts`), incluindo isolamento entre
+      tenants e o papel exigido em cada rota
