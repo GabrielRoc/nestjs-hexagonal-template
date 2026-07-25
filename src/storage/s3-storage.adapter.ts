@@ -22,11 +22,28 @@ export class S3StorageAdapter implements StorageServicePort {
 
     this.client = new S3Client({
       region,
+      // Sem timeout explicito o SDK espera indefinidamente por um endpoint que
+      // aceita a conexao e nao responde, segurando a requisicao HTTP do
+      // usuario. requestTimeout no @smithy/node-http-handler e um teto DURO da
+      // requisicao inteira (setTimeout simples, nao inatividade de socket), por
+      // isso aqui ele e 30s e nao os 3s do health check: um PutObject de 10MB
+      // (o MAX_FILE_SIZE do controller) leva mais de 3s em qualquer link
+      // domestico. throwOnRequestTimeout e obrigatorio -- sem ele o handler so
+      // loga um aviso e a requisicao continua pendurada. maxAttempts fica no
+      // default 3: diferente do health check, vale repetir um upload que
+      // falhou por rede.
+      requestHandler: {
+        connectionTimeout: 2000,
+        requestTimeout: 30000,
+        throwOnRequestTimeout: true,
+      },
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
     });
 
-    this.bucket =
-      this.configService.get<string>('AWS_S3_BUCKET') ?? 'template-files';
+    // Sem default silencioso: 'template-files' aqui e a ausencia de default no
+    // S3HealthIndicator faziam a mesma variavel significar coisas diferentes,
+    // e o health ficava verde apontando para um bucket que o adapter nem usa.
+    this.bucket = this.configService.get<string>('AWS_S3_BUCKET')?.trim() ?? '';
     this.defaultExpirySeconds =
       this.configService.get<number>('SIGNED_URL_EXPIRY_SECONDS') ?? 900;
   }

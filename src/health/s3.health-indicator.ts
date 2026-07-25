@@ -24,6 +24,17 @@ export class S3HealthIndicator extends HealthIndicator {
 
     this.client = new S3Client({
       region,
+      // Sem timeout explicito o SDK espera indefinidamente (setRequestTimeout(0)
+      // nao arma timer) e ainda repete 3x: /api/health e publico e ficaria
+      // pendurado por minutos quando o endpoint S3 aceita a conexao e nao
+      // responde. throwOnRequestTimeout e OBRIGATORIO: sem ele o
+      // @smithy/node-http-handler apenas loga um aviso e a requisicao continua.
+      requestHandler: {
+        connectionTimeout: 2000,
+        requestTimeout: 3000,
+        throwOnRequestTimeout: true,
+      },
+      maxAttempts: 1,
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
     });
 
@@ -33,14 +44,13 @@ export class S3HealthIndicator extends HealthIndicator {
   async isHealthy(key: string): Promise<HealthIndicatorResult> {
     // GET /api/health e publico: a resposta nunca pode descrever a infra
     // (endpoint interno, IP, credencial). O detalhe fica so no log do servidor.
+    // Sem bucket configurado o storage simplesmente nao e usado: derrubar o
+    // health de um deploy que nao usa S3 impede o rollout inteiro.
     if (!this.bucket) {
-      this.logger.error(
-        'S3 health check failed: AWS_S3_BUCKET não configurado',
+      this.logger.warn(
+        'AWS_S3_BUCKET nao configurado: check de storage ignorado',
       );
-      throw new HealthCheckError(
-        'S3 health check failed',
-        this.getStatus(key, false, { message: UNAVAILABLE_MESSAGE }),
-      );
+      return this.getStatus(key, true, { configured: false });
     }
 
     try {
