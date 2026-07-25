@@ -289,7 +289,9 @@ flowchart TD
 
 2. **TenantGuard**: Valida que o `tenantId` esta presente no contexto. Superadmins operam sem restricao de tenant.
 
-3. **Repository Adapter**: Toda query inclui `WHERE tenantId = :tenantId`, garantindo isolamento a nivel de dados. O `tenantId` e passado como parametro obrigatorio em todos os metodos do port.
+3. **FeatureGuard**: Só age em rotas marcadas com `@RequiresFeature()`; nas demais devolve `true` sem tocar em cache ou banco. Quando a flag esta desligada para o tenant, responde 403 `FEATURE_DISABLED`. Vive em `src/tenant-feature/infrastructure/http/` (e nao em `src/common/guards/`) porque depende do `TenantFeatureService` — `common` nao deve conhecer modulo de feature. Superadmins tem bypass, na mesma ordem do `TenantGuard`.
+
+4. **Repository Adapter**: Toda query inclui `WHERE tenantId = :tenantId`, garantindo isolamento a nivel de dados. O `tenantId` e passado como parametro obrigatorio em todos os metodos do port.
 
 ---
 

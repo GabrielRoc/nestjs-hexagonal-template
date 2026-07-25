@@ -37,18 +37,19 @@ modulo/
 
 ### Modulos existentes
 
-| Modulo      | Caminho          | Descricao                                 |
-| ----------- | ---------------- | ----------------------------------------- |
-| `auth`      | `src/auth/`      | Autenticacao via SuperTokens              |
-| `user`      | `src/user/`      | Gestao de usuarios                        |
-| `tenant`    | `src/tenant/`    | Multi-tenancy                             |
-| `audit-log` | `src/audit-log/` | Log de auditoria                          |
-| `health`    | `src/health/`    | Health check (db, storage, redis)         |
-| `storage`   | `src/storage/`   | Upload de arquivos (S3)                   |
-| `anti-bot`  | `src/anti-bot/`  | Protecao anti-bot em camadas (opt-in)     |
-| `queue`     | `src/queue/`     | Conexao BullMQ/Redis compartilhada        |
-| `sample`    | `src/sample/`    | Modulo de referencia (pode ser removido)  |
-| `common`    | `src/common/`    | Guards, filters, pipes, decorators, utils |
+| Modulo           | Caminho               | Descricao                                                                                                                     |
+| ---------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `auth`           | `src/auth/`           | Autenticacao via SuperTokens                                                                                                  |
+| `user`           | `src/user/`           | Gestao de usuarios                                                                                                            |
+| `tenant`         | `src/tenant/`         | Multi-tenancy                                                                                                                 |
+| `tenant-feature` | `src/tenant-feature/` | Feature flags por tenant (`@RequiresFeature` + `FeatureGuard`). `FeatureKey` vem vazio: preencha com as chaves do seu projeto |
+| `audit-log`      | `src/audit-log/`      | Log de auditoria                                                                                                              |
+| `health`         | `src/health/`         | Health check (db, storage, redis)                                                                                             |
+| `storage`        | `src/storage/`        | Upload de arquivos (S3)                                                                                                       |
+| `anti-bot`       | `src/anti-bot/`       | Protecao anti-bot em camadas (opt-in)                                                                                         |
+| `queue`          | `src/queue/`          | Conexao BullMQ/Redis compartilhada                                                                                            |
+| `sample`         | `src/sample/`         | Modulo de referencia (pode ser removido)                                                                                      |
+| `common`         | `src/common/`         | Guards, filters, pipes, decorators, utils                                                                                     |
 
 ---
 
