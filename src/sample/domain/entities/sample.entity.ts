@@ -4,6 +4,7 @@ export class Sample {
   name: string;
   description: string | null;
   isActive: boolean;
+  sortOrder: number;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -14,6 +15,7 @@ export class Sample {
     name: string;
     description?: string | null;
     isActive?: boolean;
+    sortOrder?: number;
     createdAt?: Date;
     updatedAt?: Date;
     deletedAt?: Date | null;
@@ -23,6 +25,7 @@ export class Sample {
     this.name = props.name;
     this.description = props.description ?? null;
     this.isActive = props.isActive ?? true;
+    this.sortOrder = props.sortOrder ?? 0;
     this.createdAt = props.createdAt ?? new Date();
     this.updatedAt = props.updatedAt ?? new Date();
     this.deletedAt = props.deletedAt ?? null;

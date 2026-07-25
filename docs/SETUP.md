@@ -137,18 +137,96 @@ Aguarde ate que todos os servicos estejam com status `healthy` ou `running`.
 
 ## 5. Criar o Schema do Banco
 
-O template **nao versiona migrations**: as 5 entidades ORM (samples, users, tenants, audit_logs, tenant_features) nao tem DDL commitado e `synchronize` e `false` de proposito. Com o PostgreSQL rodando, gere a migration inicial e execute-a:
+O template ja versiona a migration inicial
+(`src/database/migrations/*-InitialSchema.ts`), que cria `app_tenants`, `users`,
+`audit_logs`, `samples` e `tenant_features`. `synchronize` e `false` de proposito, entao rode:
 
 ```bash
-npm run migration:generate -- src/database/migrations/InitialSchema
 npm run migration:run
 ```
 
-Os dois comandos compilam o projeto antes de chamar o CLI do TypeORM. `migration:run` executa todas as migrations pendentes.
+O comando compila o projeto antes de chamar o CLI do TypeORM e executa todas as
+migrations pendentes.
 
 Sem esse passo a aplicacao sobe normalmente, mas a primeira query falha com `relation "..." does not exist` -- e nas rotas autenticadas o erro chega ao cliente como um 403 opaco, nao como erro de banco.
 
-Confira na migration gerada o indice unico **parcial** de `tenant_features` (`... ("tenantId", "featureKey") WHERE "deletedAt" IS NULL`). O predicado vem do `@Index` da entidade e e o que permite recriar uma flag apagada logicamente; um unique comum quebraria o `ON CONFLICT` do upsert de features.
+### Banco de testes
+
+`npm run test:e2e` roda contra um banco separado, `template_db_test`, e faz
+`dropSchema` nele a cada execucao (por isso o harness recusa qualquer nome que
+nao termine em `_test`). O `docker-compose.yml` cria esse banco no primeiro boot
+do volume do Postgres. Se o seu volume ja existia antes desta versao do template:
+
+```bash
+docker compose exec postgres createdb -U postgres template_db_test
+```
+
+O e2e cria o schema pela propria migration, entao nao e preciso rodar
+`migration:run` nesse banco.
+
+O e2e tambem exige o **Redis de pe** (`REDIS_HOST`/`REDIS_PORT`) — o
+`docker compose up -d` ja sobe o servico, e o job `test-e2e` do CI tem o servico
+`redis` ao lado do `postgres`. A rota que enfileira trabalho e coberta ponta a
+ponta: o Worker do BullMQ roda dentro do processo de teste e o assert final e no
+banco, depois que o job foi processado.
+
+Sem Redis, os testes de CRUD continuam passando e apenas os da fila falham — mas
+devagar (cada um espera o timeout de 3s do adapter ou o prazo do polling). Se o
+arquivo inteiro falhar em menos de 1s com `Worker requires a connection`, o
+problema nao e o Redis: e um modulo de teste que importou um modulo com
+`@Processor` sem nenhum `BullModule.forRoot`, que e quem registra a conexao.
+
+#### Namespace do e2e no Redis
+
+O harness usa o **mesmo servidor** Redis (`REDIS_HOST`/`REDIS_PORT`) mas um
+namespace so dele: `prefix` `bull-e2e` e `db` 15 (`E2E_BULL_PREFIX` e
+`E2E_REDIS_DB` sobrescrevem; o prefixo tem de conter `e2e` ou o harness recusa
+rodar). Isso e o equivalente, para o Redis, do sufixo `_test` que protege o banco
+— e nao e cosmetico:
+
+- O `@Processor` do `SampleModule` sobe um Worker **de verdade** no `app.init()`.
+  No namespace de producao (`bull:sample:*`, o default do BullMQ) ele **consome**
+  os jobs pendentes do seu ambiente: o sample nao existe no banco de teste, o
+  `process()` loga um warn, o BullMQ marca o job como concluido e o
+  `removeOnComplete` o descarta. O efeito real nunca acontece e nao sobra erro
+  nenhum para investigar.
+- No sentido inverso, um `npm run start:dev` no ar durante o e2e disputa os jobs
+  do teste com o worker do teste, e o e2e falha sem existir bug algum.
+
+Nao basta "nao chamar `queue.obliterate()`": limpeza em massa nao e o unico jeito
+de destruir job — consumir tambem e.
+
+Dentro do namespace do harness a fila **nao** e limpa em massa; cada assercao
+filtra os jobs pelo `sampleId` que o proprio teste criou.
+
+### Gerando novas migrations
+
+`migration:generate` **exige um Postgres de pe**: ele compara a metadata das
+entidades com o schema real e nao tem como diferenciar sem conectar (sem banco, o
+comando falha com `ECONNREFUSED`).
+
+```bash
+npm run migration:generate -- src/database/migrations/NomeDaMigration
+```
+
+Depois de gerar, confira dois pontos que o TypeORM erra ou nao sabe:
+
+- Troque `uuid_generate_v4()` por `gen_random_uuid()`. O primeiro depende da
+  extensao `uuid-ossp`; o TypeORM tenta instala-la na conexao mas engole o erro
+  quando o papel do banco nao e dono dele, e a migration quebra com
+  `function uuid_generate_v4() does not exist`.
+- Unicidade em tabela com soft delete tem de ser indice parcial
+  (`WHERE "deletedAt" IS NULL`) — declare na entidade com
+  `@Index([...], { unique: true, where: '"deletedAt" IS NULL' })` e o TypeORM
+  gera certo. Ver `docs/CONVENTIONS.md`.
+
+Nao renomeie os indices/constraints gerados: o proximo `migration:generate`
+passaria a acusar diferenca e emitir DROP/CREATE sem motivo.
+
+O caso concreto no template e `tenant_features`: o indice unico e parcial em
+`("tenantId", "featureKey") WHERE "deletedAt" IS NULL`. O predicado vem do
+`@Index` da entidade e e o que permite recriar uma flag apagada logicamente —
+um unique comum quebraria o `ON CONFLICT` do upsert de features.
 
 ---
 
@@ -246,7 +324,7 @@ Apos criar o usuario no SuperTokens, voce precisa registra-lo na aplicacao:
 | `npm test`                                                              | Executar testes unitarios                                    |
 | `npm run test:watch`                                                    | Testes em modo watch                                         |
 | `npm run test:cov`                                                      | Testes com relatorio de cobertura                            |
-| `npm run test:e2e`                                                      | Testes end-to-end                                            |
+| `npm run test:e2e`                                                      | Testes end-to-end (exigem Postgres e Redis de pe)            |
 | `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gerar migration                                              |
 | `npm run migration:create -- src/database/migrations/NomeDaMigration`   | Criar migration vazia                                        |
 | `npm run migration:run`                                                 | Executar migrations pendentes                                |

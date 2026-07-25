@@ -8,11 +8,11 @@ import {
   Param,
   Patch,
   Post,
-  UsePipes,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums/role.enum';
+import { UuidValidationPipe } from '../../../common/pipes/uuid-validation.pipe';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import {
   createTenantSchema,
@@ -34,7 +34,6 @@ import { ErrorCode } from '../../../common/enums/error-codes.enum';
 
 @ApiTags('Tenants')
 @Controller('v1/tenants')
-@Roles(Role.SUPERADMIN)
 export class TenantController {
   constructor(
     private readonly createTenantUseCase: CreateTenantUseCase,
@@ -44,14 +43,17 @@ export class TenantController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @UsePipes(new ZodValidationPipe(createTenantSchema))
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'Create a tenant' })
-  async create(@Body() dto: CreateTenantDto) {
+  async create(
+    @Body(new ZodValidationPipe(createTenantSchema)) dto: CreateTenantDto,
+  ) {
     const tenant = await this.createTenantUseCase.execute(dto);
     return { data: tenant };
   }
 
   @Get()
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'List all tenants' })
   async list() {
     const tenants = await this.tenantRepo.findAll();
@@ -59,8 +61,11 @@ export class TenantController {
   }
 
   @Get(':id')
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'Get a tenant by ID' })
-  async findOne(@Param('id') id: string) {
+  // O pipe por parametro e obrigatorio: sem ele um id fora do formato UUID
+  // chega a coluna `uuid` e o 22P02 do Postgres vira 500 no filtro global.
+  async findOne(@Param('id', new UuidValidationPipe()) id: string) {
     const tenant = await this.tenantRepo.findById(id);
     if (!tenant) {
       throw new DomainException(
@@ -73,9 +78,10 @@ export class TenantController {
   }
 
   @Patch(':id')
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'Update a tenant' })
   async update(
-    @Param('id') id: string,
+    @Param('id', new UuidValidationPipe()) id: string,
     @Body(new ZodValidationPipe(updateTenantSchema)) dto: UpdateTenantDto,
   ) {
     const tenant = await this.tenantRepo.findById(id);
@@ -96,8 +102,9 @@ export class TenantController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'Soft delete a tenant' })
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id', new UuidValidationPipe()) id: string) {
     await this.tenantRepo.softDelete(id);
   }
 }

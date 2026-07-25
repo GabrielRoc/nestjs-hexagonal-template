@@ -7,10 +7,24 @@ import {
   DeleteDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { TenantTypeormEntity } from '../../../tenant/infrastructure/persistence/tenant.typeorm-entity';
 
+/**
+ * Os dois unique sao **indices parciais** (`WHERE "deletedAt" IS NULL`): um
+ * unique comum contaria as linhas soft-deletadas e um usuario excluido
+ * bloquearia para sempre o recadastro do mesmo e-mail / do mesmo usuario do
+ * SuperTokens.
+ *
+ * O indice de e-mail comeca por `tenantId` (convencao de indice composto) e
+ * transforma em erro do banco a corrida que `CreateUserUseCase` nao consegue
+ * fechar sozinho: o `findByEmail` antes do `save` deixa uma janela entre a
+ * leitura e a escrita.
+ */
 @Entity('users')
+@Index(['supertokensUserId'], { unique: true, where: '"deletedAt" IS NULL' })
+@Index(['tenantId', 'email'], { unique: true, where: '"deletedAt" IS NULL' })
 export class UserTypeormEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -22,7 +36,7 @@ export class UserTypeormEntity {
   @JoinColumn({ name: 'tenantId' })
   tenant!: TenantTypeormEntity;
 
-  @Column({ type: 'varchar', length: 255, unique: true })
+  @Column({ type: 'varchar', length: 255 })
   supertokensUserId!: string;
 
   @Column({ type: 'varchar', length: 255 })

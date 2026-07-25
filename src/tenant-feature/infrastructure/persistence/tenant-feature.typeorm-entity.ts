@@ -19,12 +19,13 @@ import { FEATURE_KEY_MAX_LENGTH } from '../../domain/enums/feature-key.enum';
  * predicado reaparece no `indexPredicate` do repositorio, sem o que o Postgres
  * recusa o `ON CONFLICT`.
  *
- * O DDL desta tabela sai da migration que o projeto consumidor gera (o template
- * nao versiona migrations — ver docs/SETUP.md secao 5). O `where` acima chega na
+ * Este modulo nao traz migration propria: o DDL de `tenant_features` sai da
+ * `InitialSchema` versionada em `src/database/migrations/`, como o das outras
+ * quatro entidades do template. Entidade que nao aparece la deixa o clone sem a
+ * tabela — ver docs/SETUP.md secao 5. O `where` acima chega na
  * migration gerada: o TypeORM concatena o predicado no CREATE INDEX
  * (`PostgresQueryRunner.createIndexSql`). A FK de `tenantId` sai do @ManyToOne
- * abaixo, e o `uuid-ossp` de `uuid_generate_v4()` e instalado pelo driver no
- * afterConnect. Nada aqui depende de DDL escrito a mao.
+ * abaixo. Nada aqui depende de DDL escrito a mao.
  */
 @Entity('tenant_features')
 @Index('idx_tenant_features_tenant_key', ['tenantId', 'featureKey'], {

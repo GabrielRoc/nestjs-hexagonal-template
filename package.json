@@ -19,7 +19,7 @@
     "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\" --max-warnings 0",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"*.{json,md,yml,yaml}\" \"docs/**/*.md\" \".github/**/*.{yml,yaml}\" \"infra/**/*.{yml,yaml,md}\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "jest --passWithNoTests",
+    "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
@@ -114,7 +114,16 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.ts",
+      "!**/*.module.ts",
+      "!**/*.dto.ts",
+      "!**/*.swagger.ts",
+      "!**/*.typeorm-entity.ts",
+      "!**/*.port.ts",
+      "!main.ts",
+      "!instrument.ts",
+      "!config/**",
+      "!database/**"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
