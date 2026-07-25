@@ -610,6 +610,7 @@ import {
 } from '@nestjs/swagger';
 import { Roles, TenantId } from '../../../common/decorators';
 import { Role } from '../../../common/enums/role.enum';
+import { UuidValidationPipe } from '../../../common/pipes/uuid-validation.pipe';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import {
   createSampleSchema,
@@ -669,8 +670,12 @@ export class SampleController {
   @ApiOperation({ summary: 'Get a sample by ID' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, type: SampleResponseSwagger })
+  @ApiResponse({ status: 400, type: ErrorResponseSwagger })
   @ApiResponse({ status: 404, type: ErrorResponseSwagger })
-  async findOne(@Param('id') id: string, @TenantId() tenantId: string) {
+  async findOne(
+    @Param('id', new UuidValidationPipe()) id: string,
+    @TenantId() tenantId: string,
+  ) {
     const sample = await this.getSampleUseCase.execute(id, tenantId);
     return { data: sample };
   }
@@ -683,7 +688,7 @@ export class SampleController {
   @ApiResponse({ status: 200, type: SampleResponseSwagger })
   @ApiResponse({ status: 404, type: ErrorResponseSwagger })
   async update(
-    @Param('id') id: string,
+    @Param('id', new UuidValidationPipe()) id: string,
     @TenantId() tenantId: string,
     @Body(new ZodValidationPipe(updateSampleSchema)) dto: UpdateSampleDto,
   ) {
@@ -697,8 +702,12 @@ export class SampleController {
   @ApiOperation({ summary: 'Soft delete a sample' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 204, description: 'Sample removido (soft delete)' })
+  @ApiResponse({ status: 400, type: ErrorResponseSwagger })
   @ApiResponse({ status: 404, type: ErrorResponseSwagger })
-  async remove(@Param('id') id: string, @TenantId() tenantId: string) {
+  async remove(
+    @Param('id', new UuidValidationPipe()) id: string,
+    @TenantId() tenantId: string,
+  ) {
     await this.deleteSampleUseCase.execute(id, tenantId);
   }
 }
@@ -716,6 +725,11 @@ export class SampleController {
   `@UsePipes` aplica o pipe a todos os argumentos do handler (`@Param`,
   `@Query`, `@TenantId`): a string do id vai para o schema de objeto do body e a
   rota responde 400 sempre.
+- **`@Param('id', new UuidValidationPipe())` em toda rota com `:id`.** Sem o pipe
+  a string crua chega a uma coluna `uuid`, o Postgres estoura `22P02` e o filtro
+  global devolve **500** para um id malformado (`GET /api/v1/samples/abc`). Com o
+  pipe e 400 `VALIDATION_ERROR`, e o `@ApiParam({ format: 'uuid' })` passa a ser
+  verdade. Ver `docs/CONVENTIONS.md`.
 - Swagger completo: `@ApiOperation`, `@ApiParam`/`@ApiQuery`, `@ApiBody` e um
   `@ApiResponse` por status possivel. Os tipos de sucesso declaram o envelope
   (`SampleResponseSwagger` = `{ data }`), os de erro usam o
@@ -1263,6 +1277,7 @@ it('propaga falha de persistencia para o BullMQ reagendar', async () => {
 - [ ] Testes unitarios escritos para use cases, domain services e processors
       (padrao em `CLAUDE.md`, secao "Convencoes de teste")
 - [ ] Rotas cobertas no e2e (`test/*.e2e-spec.ts`), incluindo isolamento entre
-      tenants e o papel exigido em cada rota — rota que enfileira tambem precisa
-      do `@Roles`, e o modulo de teste precisa importar o `QueueModule` junto com
-      o modulo de dominio (ver "Convencoes de teste" no `CLAUDE.md`)
+      tenants, o papel exigido em cada rota e `:id` malformado devolvendo 400 —
+      rota que enfileira tambem precisa do `@Roles`, e o modulo de teste precisa
+      do seu proprio `BullModule.forRoot` com `prefix`/`db` de teste, nunca do
+      `QueueModule` cru (ver "Convencoes de teste" no `CLAUDE.md`)

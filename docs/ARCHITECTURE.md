@@ -395,7 +395,7 @@ src/
     interceptors/          # AuditLogInterceptor
     interfaces/            # ApiResponse, PaginatedResponse
     middleware/             # TenantContextMiddleware
-    pipes/                 # ZodValidationPipe
+    pipes/                 # ZodValidationPipe, UuidValidationPipe
     utils/                 # pagination, validate-cpf, validate-cnpj
 
   config/                  # Configuracoes do app, database, redis, supertokens

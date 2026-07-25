@@ -21,6 +21,7 @@ import {
 } from '@nestjs/swagger';
 import { Roles, TenantId } from '../../../common/decorators';
 import { Role } from '../../../common/enums/role.enum';
+import { UuidValidationPipe } from '../../../common/pipes/uuid-validation.pipe';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import { ErrorResponseSwagger } from '../../../common/swagger/common.swagger';
 import {
@@ -50,16 +51,23 @@ import { ScheduleSampleDeactivationUseCase } from '../../application/use-cases/s
  * Controller de referencia. Ele so valida a entrada e delega — nenhuma regra de
  * negocio, nenhum acesso a repositorio.
  *
- * Tres convencoes que este arquivo existe para demonstrar:
+ * Quatro convencoes que este arquivo existe para demonstrar:
  *
  * 1. **`@Body(new ZodValidationPipe(schema))`, nunca `@UsePipes(...)`.** O
  *    `@UsePipes` aplica o schema a **todos** os argumentos do handler: no dia em
  *    que a rota ganha um `@Param('id')`, o pipe tenta validar a string do id
  *    contra o schema do body e a rota passa a responder 400 sempre.
- * 2. **`@Roles` por rota, nunca na classe.** Na classe, leitura e escrita
+ * 2. **`@Param('id', new UuidValidationPipe())` em toda rota com `:id`.** O outro
+ *    lado da moeda do item 1, e o caso que so um pipe **por parametro** resolve:
+ *    sem ele a string crua chega a uma coluna `uuid`, o Postgres estoura `22P02`
+ *    e o `GlobalExceptionFilter` devolve **500** para o que e apenas um id
+ *    malformado. Com o pipe, `GET /api/v1/samples/abc` responde 400
+ *    `VALIDATION_ERROR` — e o `format: 'uuid'` do `@ApiParam` deixa de ser uma
+ *    promessa vazia no contrato OpenAPI.
+ * 3. **`@Roles` por rota, nunca na classe.** Na classe, leitura e escrita
  *    compartilham permissao — quem pode listar passa a poder apagar. Aqui
  *    leitura e ADMIN+USER e escrita e ADMIN.
- * 3. **Swagger completo**: `@ApiOperation`, `@ApiParam`/`@ApiQuery`, `@ApiBody` e
+ * 4. **Swagger completo**: `@ApiOperation`, `@ApiParam`/`@ApiQuery`, `@ApiBody` e
  *    um `@ApiResponse` por status possivel, com `ErrorResponseSwagger` nos erros.
  *    Os tipos de sucesso ja incluem o envelope `{ data }`.
  */
@@ -144,11 +152,19 @@ export class SampleController {
     type: SampleResponseSwagger,
   })
   @ApiResponse({
+    status: 400,
+    description: 'Id fora do formato UUID v4 (VALIDATION_ERROR)',
+    type: ErrorResponseSwagger,
+  })
+  @ApiResponse({
     status: 404,
     description: 'Sample nao encontrado (SAMPLE_NOT_FOUND)',
     type: ErrorResponseSwagger,
   })
-  async findOne(@Param('id') id: string, @TenantId() tenantId: string) {
+  async findOne(
+    @Param('id', new UuidValidationPipe()) id: string,
+    @TenantId() tenantId: string,
+  ) {
     const sample = await this.getSampleUseCase.execute(id, tenantId);
     return { data: sample };
   }
@@ -174,7 +190,7 @@ export class SampleController {
     type: ErrorResponseSwagger,
   })
   async update(
-    @Param('id') id: string,
+    @Param('id', new UuidValidationPipe()) id: string,
     @TenantId() tenantId: string,
     @Body(new ZodValidationPipe(updateSampleSchema)) dto: UpdateSampleDto,
   ) {
@@ -189,11 +205,19 @@ export class SampleController {
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 204, description: 'Sample removido (soft delete)' })
   @ApiResponse({
+    status: 400,
+    description: 'Id fora do formato UUID v4 (VALIDATION_ERROR)',
+    type: ErrorResponseSwagger,
+  })
+  @ApiResponse({
     status: 404,
     description: 'Sample nao encontrado (SAMPLE_NOT_FOUND)',
     type: ErrorResponseSwagger,
   })
-  async remove(@Param('id') id: string, @TenantId() tenantId: string) {
+  async remove(
+    @Param('id', new UuidValidationPipe()) id: string,
+    @TenantId() tenantId: string,
+  ) {
     await this.deleteSampleUseCase.execute(id, tenantId);
   }
 
@@ -231,7 +255,7 @@ export class SampleController {
     type: ErrorResponseSwagger,
   })
   async scheduleDeactivation(
-    @Param('id') id: string,
+    @Param('id', new UuidValidationPipe()) id: string,
     @TenantId() tenantId: string,
     @Body(new ZodValidationPipe(scheduleSampleDeactivationSchema))
     dto: ScheduleSampleDeactivationDto,

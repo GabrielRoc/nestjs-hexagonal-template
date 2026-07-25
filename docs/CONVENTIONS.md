@@ -165,7 +165,10 @@ Para operacoes de exclusao, retornar HTTP **204 No Content** sem body:
 ```typescript
 @Delete(':id')
 @HttpCode(HttpStatus.NO_CONTENT)
-async remove(@Param('id') id: string, @TenantId() tenantId: string) {
+async remove(
+  @Param('id', new UuidValidationPipe()) id: string,
+  @TenantId() tenantId: string,
+) {
   await this.deleteSampleUseCase.execute(id, tenantId);
 }
 ```
@@ -276,7 +279,7 @@ export const createSampleSchema = z.object({
 export type CreateSampleDto = z.infer<typeof createSampleSchema>;
 ```
 
-### ZodValidationPipe no Controller
+### Pipes no Controller
 
 A validacao e aplicada **sempre no parametro**, nunca com `@UsePipes`:
 
@@ -289,7 +292,7 @@ async create(
 
 @Patch(':id')
 async update(
-  @Param('id') id: string,
+  @Param('id', new UuidValidationPipe()) id: string,
   @Body(new ZodValidationPipe(updateSampleSchema)) dto: UpdateSampleDto,
 ) {}
 ```
@@ -301,6 +304,18 @@ schema de objeto do body e a rota passa a responder **400 sempre**. Nao e um
 risco futuro: e o que acontece na primeira vez que a rota ganha qualquer
 parametro alem do body. Exemplo correto e comentado em
 `src/sample/infrastructure/http/sample.controller.ts`.
+
+**Toda rota com `:id` leva `@Param('id', new UuidValidationPipe())`**
+(`src/common/pipes/uuid-validation.pipe.ts`). E o caso que so o pipe por
+parametro resolve, e ele existe por um bug concreto: sem validacao a string crua
+chega ao `findOne({ where: { id } })` sobre uma coluna `uuid`, o Postgres rejeita
+com `22P02 invalid input syntax for type uuid`, o `QueryFailedError` nao e
+`HttpException` nem `DomainException` e o `GlobalExceptionFilter` responde **500
+`INTERNAL_ERROR`** com stack de banco no log. `GET /api/v1/samples/abc` — de um
+cliente com id errado ou de um scanner — virava 5xx e alerta. Com o pipe e 400
+`VALIDATION_ERROR`, no mesmo formato de `details` do Zod, e o
+`@ApiParam({ format: 'uuid' })` para de prometer uma validacao inexistente. O
+`version: '4'` do pipe casa com os ids do template, todos de `gen_random_uuid()`.
 
 ### Validacao de CPF e CNPJ
 
