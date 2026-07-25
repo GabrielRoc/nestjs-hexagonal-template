@@ -164,21 +164,36 @@ export class SampleOrmEntity {
 
 ## Modulo anti-bot (`src/anti-bot/`)
 
-Cinco camadas independentes para formularios publicos, compostas pelo decorator
+Camadas independentes para formularios publicos, compostas pelo decorator
 `@AntiBot()`. Cada camada resolve um ataque diferente; nenhuma delas basta sozinha.
+A tabela esta na ordem em que o stack roda, que e parte do contrato:
 
-| Camada                     | O que para                                                    | Ao pegar                     |
-| -------------------------- | ------------------------------------------------------------- | ---------------------------- |
-| `HoneypotGuard`            | bot que preenche todo `<input>` (campo isca `website`)        | **200 falso**                |
-| `TimingGuard`              | submit instantaneo (script) e formulario velho (replay/aba)   | 200 falso / 400 expirado     |
-| `FormTokenGuard`           | POST direto sem carregar o form, e reenvio do mesmo corpo     | 400 (falha **fechada**)      |
-| `ChallengeGuard`           | acesso a recurso restrito por resposta combinada fora do site | 400                          |
-| `TurnstileGuard`           | automacao com navegador real (Puppeteer/Playwright)           | 400 (inerte se desabilitado) |
-| `BodySanitizerInterceptor` | remove os campos de controle antes do DTO/dominio/audit log   | —                            |
+| #   | Camada                     | O que para                                                    | Ao pegar                     |
+| --- | -------------------------- | ------------------------------------------------------------- | ---------------------------- |
+| 1   | `HoneypotGuard`            | bot que preenche todo `<input>` (campo isca `website`)        | **200 falso**                |
+| 2   | `FormTokenGuard`           | POST direto sem carregar o form (verifica o token, nao gasta) | 400 (falha **fechada**)      |
+| 3   | `TimingGuard`              | submit instantaneo (script) e formulario velho (aba parada)   | 200 falso / 400 expirado     |
+| 4   | `TurnstileGuard`           | automacao com navegador real (Puppeteer/Playwright)           | 400 (inerte se desabilitado) |
+| 5   | `ChallengeGuard`           | acesso a recurso restrito por resposta combinada fora do site | 400                          |
+| 6   | `FormTokenConsumeGuard`    | replay: gasta o `jti` do token, uma submissao por token       | 400                          |
+| —   | `BodySanitizerInterceptor` | remove os campos de controle antes do DTO/dominio/audit log   | —                            |
 
 O **200 falso** e deliberado: um 403 diz ao atacante qual campo era a isca ou
 quanto tempo esperar, e ele corrige em duas tentativas. Detalhes em
-`src/anti-bot/infrastructure/fake-success.ts`.
+`src/anti-bot/infrastructure/fake-success.ts` — que tambem LOGA todo descarte, para
+o bloqueio nao ser invisivel ao operador.
+
+Duas escolhas de ordem que nao devem ser desfeitas (ha teste em
+`decorators/anti-bot.decorator.spec.ts`):
+
+- **verificar o form token na 2 e gasta-lo na 6.** As camadas 4 e 5 falham por rede
+  ou por erro de digitacao, e as duas mandam "tente novamente"; com o token gasto no
+  meio do stack, a segunda tentativa com o mesmo formulario morria em "token ja
+  utilizado". O consumo ainda acontece antes do handler, que e o que impede replay
+  concorrente.
+- **medir o tempo (3) depois de verificar o token (2).** A idade do formulario sai do
+  `iat` assinado pelo servidor, nao do relogio do cliente: relogio adiantado produzia
+  idade negativa e descartava submissao legitima com um 200 falso.
 
 ### Ligando numa rota
 
@@ -196,9 +211,11 @@ export class ThingModule {}
 async create(@Body(new ZodValidationPipe(createMessageSchema)) dto: CreateMessageDto) {}
 ```
 
-O frontend precisa: chamar `GET /api/v1/anti-bot/form-token` ao renderizar e
-mandar o valor no header `x-form-token`; enviar `_t` com `Date.now()` da
-renderizacao; e um input escondido `website` (vazio).
+O frontend precisa: chamar `GET /api/v1/anti-bot/form-token` ao renderizar e mandar
+o valor no header `x-form-token`; e um input escondido `website` (vazio). O `_t`
+(`Date.now()` da renderizacao) e opcional no stack completo — quem manda na janela
+de tempo e o `iat` assinado do form token; `_t` so e usado por rota que aplica
+`@UseGuards(TimingGuard)` sem form token.
 
 Nao use `@AntiBot()` em rota cujo frontend nao busca form token — o
 `FormTokenGuard` falha fechado. Para rotas em que so o CAPTCHA faz sentido
@@ -220,7 +237,9 @@ providers: [{ provide: CHALLENGE_RESOURCE_RESOLVER, useClass: ThingChallengeReso
 `TOKEN_STORE` guarda os `jti` ja usados. O template traz so o adapter em memoria:
 uso unico **por processo**, e um restart/deploy esvazia o registro. Para uso unico
 global, implemente o adapter Redis descrito em
-`infrastructure/persistence/token-store.provider.ts`.
+`infrastructure/persistence/token-store.provider.ts`. `ANTI_BOT_REDIS_URL` existe
+para avisar quem espera esse store compartilhado (nao ha fallback para `REDIS_URL`,
+que pertence a fila/cache).
 
 ### Default
 

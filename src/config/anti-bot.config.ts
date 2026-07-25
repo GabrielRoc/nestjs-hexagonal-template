@@ -42,11 +42,16 @@ export const antiBotConfig = registerAs('antiBot', () => ({
   turnstileFailOpen: process.env.TURNSTILE_FAIL_OPEN !== 'false',
 
   /**
-   * Presenca de configuracao de Redis. Este template NAO traz adapter Redis
-   * (nao ha cliente instalado); serve para avisar quem configurou Redis
-   * esperando um store compartilhado. Ver token-store.provider.ts.
+   * Presenca de configuracao de Redis PARA O ANTI-BOT. Este template NAO traz
+   * adapter Redis (nao ha cliente instalado); a variavel existe para avisar quem
+   * a definiu esperando um store de form tokens compartilhado entre instancias.
+   * Ver token-store.provider.ts, que tem o passo a passo do adapter.
+   *
+   * Le SO `ANTI_BOT_REDIS_URL`, sem fallback para `REDIS_URL`: essa outra
+   * variavel pertence a quem usa Redis para fila ou cache, e quem a define para
+   * uma fila nao esta pedindo store de form token. Com o fallback, esses projetos
+   * imprimiam o aviso do anti-bot em TODO boot — mesmo sem nenhuma rota
+   * `@AntiBot()` — e nao havia nem como descobrir de onde vinha.
    */
-  redisUrl: (process.env.ANTI_BOT_REDIS_URL ?? process.env.REDIS_URL ?? '')
-    .trim()
-    .replace(/\/+$/, ''),
+  redisUrl: (process.env.ANTI_BOT_REDIS_URL ?? '').trim().replace(/\/+$/, ''),
 }));

@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHmac } from 'crypto';
 import { FormTokenService } from './form-token.service';
 
 const SECRET = 'a'.repeat(64);
@@ -17,19 +18,36 @@ function configService(overrides: Record<string, unknown> = {}): ConfigService {
   } as unknown as ConfigService;
 }
 
-/** Reassina o payload alterado com um segredo diferente. */
+/** Altera o payload e MANTEM a assinatura original (nao reassina). */
 function tamperPayload(
   token: string,
   changes: Record<string, unknown>,
 ): string {
   const [header, body, signature] = token.split('.');
+  return `${header}.${forgePayload(body, changes)}.${signature}`;
+}
+
+/** Altera o payload e reassina com um segredo estrangeiro. */
+function tamperAndResign(
+  token: string,
+  changes: Record<string, unknown>,
+  foreignSecret: string,
+): string {
+  const [header, body] = token.split('.');
+  const forged = forgePayload(body, changes);
+  const signature = createHmac('sha256', foreignSecret)
+    .update(`${header}.${forged}`)
+    .digest('base64url');
+  return `${header}.${forged}.${signature}`;
+}
+
+function forgePayload(body: string, changes: Record<string, unknown>): string {
   const payload = JSON.parse(
     Buffer.from(body, 'base64url').toString('utf-8'),
   ) as Record<string, unknown>;
-  const forged = Buffer.from(
-    JSON.stringify({ ...payload, ...changes }),
-  ).toString('base64url');
-  return `${header}.${forged}.${signature}`;
+  return Buffer.from(JSON.stringify({ ...payload, ...changes })).toString(
+    'base64url',
+  );
 }
 
 describe('FormTokenService', () => {
@@ -79,6 +97,19 @@ describe('FormTokenService', () => {
 
     expect(
       service.verify(tamperPayload(token, { exp: 9_999_999_999 })),
+    ).toBeNull();
+  });
+
+  it('rejeita payload alterado E reassinado com outro segredo', () => {
+    const { token } = service.issue('signup');
+
+    // O ataque completo: esticar o `exp` e produzir uma assinatura coerente com o
+    // payload novo. Só falha porque o segredo nao e o do servidor — e por isso o
+    // caso nao esta coberto pelos dois testes vizinhos, que mudam uma coisa cada.
+    expect(
+      service.verify(
+        tamperAndResign(token, { exp: 9_999_999_999 }, 'b'.repeat(64)),
+      ),
     ).toBeNull();
   });
 

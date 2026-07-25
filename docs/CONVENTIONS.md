@@ -430,11 +430,20 @@ Camadas opt-in para formularios publicos (`src/anti-bot/`), aplicadas por rota c
 `ANTI_BOT_TOKEN_SECRET` (chave HMAC dos form tokens). Duas limitacoes conhecidas:
 
 - o registro de tokens usados e **in-memory por processo**, entao o uso unico vale por
-  instancia e zera no restart (mesma limitacao do throttler; a solucao tambem e Redis);
+  instancia e zera no restart (mesma limitacao do throttler; a solucao tambem e Redis).
+  `ANTI_BOT_REDIS_URL` nao liga nada hoje: so registra um aviso no boot para quem
+  esperava o store compartilhado. Nao ha fallback para `REDIS_URL`, que pertence a
+  fila/cache;
 - `TURNSTILE_FAIL_OPEN=true` (default) libera a requisicao quando a Cloudflare esta
   inacessivel — disponibilidade sobre rigor. `false` inverte a escolha.
 
-Ver a secao "Modulo anti-bot" no `CLAUDE.md` para o que cada camada bloqueia.
+O modulo **nao adiciona dependencia de producao**, por escolha: a verificacao do
+Turnstile usa o `fetch` global do Node (uma chamada HTTP nao justifica
+`@nestjs/axios` + `axios` herdados por todo projeto gerado do template) e a limpeza
+do registro de tokens e amortizada nas escritas, o que dispensa `@nestjs/schedule`.
+
+Ver a secao "Modulo anti-bot" no `CLAUDE.md` para o que cada camada bloqueia e para a
+ordem do stack (que e contrato: o form token e verificado no inicio e gasto no fim).
 
 ### URLs Assinadas (S3)
 

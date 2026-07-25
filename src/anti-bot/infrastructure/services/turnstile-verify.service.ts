@@ -12,9 +12,15 @@ interface TurnstileVerifyResponse {
 /**
  * Verificacao server-side do token do widget Cloudflare Turnstile.
  *
- * Usa o `fetch` global do Node (>= 22.13 pelo `engines`) em vez de
- * `@nestjs/axios`: e uma unica chamada HTTP e o axios entraria como dependencia
- * de producao permanente do template (ver report-anti-bot.md).
+ * Usa o `fetch` global do Node em vez de `@nestjs/axios` — que e o que a fonte
+ * deste modulo usava — por tres motivos: e UMA chamada HTTP, com corpo
+ * `x-www-form-urlencoded` e timeout, nada que o `fetch` nao faca; o `fetch`
+ * global existe em toda versao suportada pelo `engines` do `package.json`
+ * (>= 22.13); e `@nestjs/axios` + `axios` seriam duas dependencias de PRODUCAO
+ * permanentes num template, herdadas por todo projeto gerado dele, inclusive os
+ * que nunca ligam o Turnstile. Mesma logica na varredura do token store, que e
+ * amortizada nas escritas para dispensar `@nestjs/schedule` (ver
+ * `persistence/in-memory-token-store.ts`).
  */
 @Injectable()
 export class TurnstileVerifyService {

@@ -11,8 +11,12 @@ import { InMemoryTokenStore } from './in-memory-token-store';
  * instalou o pacote — nao ha import condicional em tempo de compilacao que valha
  * esse risco num template.
  *
- * O seam esta pronto: `TOKEN_STORE` e um port de UM metodo, e esta factory ja
- * detecta configuracao de Redis para avisar quem espera store compartilhado.
+ * O seam esta pronto: `TOKEN_STORE` e um port de UM metodo, e esta factory avisa
+ * quem definiu `ANTI_BOT_REDIS_URL` (documentada no `.env.example`) esperando um
+ * store compartilhado. O aviso olha SO essa variavel, nunca `REDIS_URL` — quem
+ * configura Redis para fila ou cache nao esta pedindo store de form token, e ver
+ * um aviso do anti-bot por causa disso e ruido sem acao possivel.
+ *
  * Para ligar o adapter compartilhado (a PR de filas e quem traz o Redis):
  *
  * 1. `npm i ioredis`
@@ -29,7 +33,7 @@ export const tokenStoreProvider: Provider = {
     const redisUrl = configService.get<string>('antiBot.redisUrl', '');
     if (redisUrl) {
       new Logger('AntiBotTokenStore').warn(
-        'Redis is configured but this build ships no Redis token store; falling back to the in-memory store (single-process single-use only).',
+        'ANTI_BOT_REDIS_URL is set but this build ships no Redis token store; falling back to the in-memory store (single-process single-use only). See src/anti-bot/infrastructure/persistence/token-store.provider.ts.',
       );
     }
     return new InMemoryTokenStore();
