@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import type { DeactivateSampleJobData } from '../../domain/ports/sample-queue.port';
@@ -44,8 +44,10 @@ import { SAMPLE_QUEUE_NAME } from './sample-queue.constants';
  * Por que nao `await sleep(retryAfterMs)`: o worker tem um numero fixo de slots
  * de concorrencia e dormir ocupa um slot inteiro sem fazer nada — com poucos
  * jobs bloqueados a fila inteira para, mesmo havendo trabalho pronto para
- * executar. Alem disso o Redis marca como *stalled* o job cujo lock nao e
- * renovado e o entrega para outro worker, duplicando o processamento.
+ * executar. (Um `await` longo nao torna o job *stalled*: o BullMQ renova o lock
+ * em um timer proprio, a cada metade do `lockRenewTime`. Quem estoura o lock e
+ * bloqueio *sincrono* do event loop ou queda do worker, que impedem o timer de
+ * rodar.)
  *
  * Detalhes que costumam quebrar: `job.token` e obrigatorio (sem ele o
  * `moveToDelayed` falha por lock invalido) e o `DelayedError` precisa subir —
@@ -87,5 +89,45 @@ export class SampleProcessor extends WorkerHost {
     await this.sampleRepo.update(sample);
 
     this.logger.log(`Sample ${sampleId} desativado pelo job ${job.name}`);
+  }
+
+  /**
+   * OBRIGATORIO em todo processor. O BullMQ sinaliza a falha de uma tentativa
+   * apenas com `worker.emit('failed', ...)`; sem nenhum listener o EventEmitter
+   * descarta o evento e o pacote nao imprime nada por conta propria. Sem este
+   * handler um job que esgota `attempts` some para `bull:<fila>:failed` sem uma
+   * unica linha de log — o efeito do job nunca acontece e ninguem descobre.
+   *
+   * O job vem `undefined` quando um job stalled atinge o limite de stalls e ja
+   * foi removido por `removeOnFail`.
+   */
+  @OnWorkerEvent('failed')
+  onFailed(job: Job<DeactivateSampleJobData> | undefined, error: Error): void {
+    // attemptsMade x attempts distingue "vai tentar de novo" de "acabou": so o
+    // segundo caso exige acao humana.
+    const attempts = job?.opts?.attempts ?? 0;
+    const attemptsMade = job?.attemptsMade ?? 0;
+    const exhausted = attemptsMade >= attempts;
+
+    this.logger.error(
+      `Job ${job?.name ?? 'unknown'} ${job?.id ?? 'unknown'} falhou ` +
+        `(tentativa ${attemptsMade}/${attempts}` +
+        `${exhausted ? ', sem novas tentativas' : ''}): ${error.message}`,
+      error.stack,
+    );
+  }
+
+  /**
+   * OBRIGATORIO em todo processor. Erros internos do worker (conexao Redis
+   * recusada, senha errada, script Lua invalido) chegam por 'error'. O BullMQ so
+   * repassa o erro de conexao `if (emitter.listenerCount('error') > 0)`, entao
+   * sem este handler a falha e completamente silenciosa.
+   */
+  @OnWorkerEvent('error')
+  onError(error: Error): void {
+    this.logger.error(
+      `Worker da fila ${SAMPLE_QUEUE_NAME} reportou erro: ${error.message}`,
+      error.stack,
+    );
   }
 }

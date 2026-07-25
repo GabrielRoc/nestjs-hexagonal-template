@@ -21,16 +21,24 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
           host: config.get<string>('redis.host'),
           port: config.get<number>('redis.port'),
           password: config.get<string | undefined>('redis.password'),
-          // OBRIGATORIO: o worker do BullMQ usa comandos bloqueantes (BZPOPMIN)
-          // que ficam parados esperando job. Com o padrao do ioredis (20) o
-          // comando estoura MaxRetriesPerRequestError e o BullMQ derruba o
-          // worker com erros confusos de conexao. O proprio BullMQ sobrescreve
-          // o valor para null nas conexoes bloqueantes, mas antes disso loga
-          // "WARNING! Your redis options maxRetriesPerRequest must be null" em
-          // console.error; declarar aqui evita o ruido e deixa a regra visivel.
-          // Efeito colateral no lado produtor: com null o `queue.add()` espera
-          // a reconexao em vez de falhar rapido quando o Redis esta fora.
-          maxRetriesPerRequest: null,
+          // `maxRetriesPerRequest` NAO e declarado aqui de proposito. Esta
+          // conexao e herdada pelo Worker (bloqueante) e pela Queue (produtor), e
+          // os dois querem valores opostos:
+          //
+          // - Worker: precisa de `null`, porque os comandos bloqueantes
+          //   (BZPOPMIN) ficam parados esperando job e estourariam
+          //   MaxRetriesPerRequestError. O proprio BullMQ forca `null` na conexao
+          //   bloqueante (`RedisConnection`: `if (blocking)
+          //   opts.maxRetriesPerRequest = null`), entao nao ha nada a fazer.
+          // - Produtor: com `null` o ioredis nunca rejeita o comando parado na
+          //   offline queue e o `queue.add()` fica pendurado no request enquanto
+          //   o Redis estiver fora. Omitindo a chave ele mantem o padrao finito
+          //   do ioredis e o comando termina em erro.
+          //
+          // O WARNING do BullMQ ("maxRetriesPerRequest must be null") so aparece
+          // quando a chave e passada com valor truthy; omitir nao gera ruido.
+          // A garantia de que o request nao trava e o timeout explicito do
+          // adapter (ver sample-queue.adapter.ts), nao este valor.
         },
       }),
     }),

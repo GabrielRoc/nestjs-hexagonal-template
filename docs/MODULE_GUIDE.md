@@ -949,13 +949,23 @@ por cada `add()` faz cada job ganhar uma politica diferente sem ninguem notar.
 // src/sample/infrastructure/queue/sample-queue.adapter.ts
 const SAMPLE_JOB_OPTIONS: JobsOptions = {
   attempts: 3,
-  backoff: { type: 'exponential', delay: 30000 }, // 30s, 60s, 120s
+  // Espera = 2^(tentativa-1) * delay -> 30s e 60s. `attempts: 3` da 2
+  // reagendamentos (a 3a execucao e a ultima), nao 3.
+  backoff: { type: 'exponential', delay: 30000 },
   removeOnComplete: 100, // sem limite o Redis guarda todo job para sempre
   removeOnFail: 1000,
 };
 
+// OBRIGATORIO: `add()` roda no request e o BullMQ espera a conexao ficar pronta
+// antes de escrever. Com o Redis fora do ar essa espera nao termina (o
+// retryStrategy do BullMQ reconecta para sempre), e sem timeout a resposta HTTP
+// nunca sai.
+const ENQUEUE_TIMEOUT_MS = 3000;
+
 @Injectable()
 export class SampleQueueAdapter implements SampleQueuePort {
+  private readonly logger = new Logger(SampleQueueAdapter.name);
+
   constructor(
     @InjectQueue(SAMPLE_QUEUE_NAME)
     private readonly queue: Queue<DeactivateSampleJobData>,
@@ -965,10 +975,21 @@ export class SampleQueueAdapter implements SampleQueuePort {
     data: DeactivateSampleJobData,
     delayMs = 0,
   ): Promise<void> {
-    await this.queue.add(SAMPLE_DEACTIVATE_JOB, data, {
-      ...SAMPLE_JOB_OPTIONS,
-      delay: delayMs,
-    });
+    try {
+      await this.withTimeout(
+        this.queue.add(SAMPLE_DEACTIVATE_JOB, data, {
+          ...SAMPLE_JOB_OPTIONS,
+          delay: delayMs,
+        }),
+      );
+    } catch (error) {
+      this.logger.error(/* detalhe da infra fica so no log */);
+      throw new DomainException(
+        ErrorCode.QUEUE_UNAVAILABLE,
+        'Nao foi possivel agendar a operacao. Tente novamente.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
   }
 }
 ```
@@ -995,6 +1016,19 @@ export class SampleProcessor extends WorkerHost {
     sample.isActive = false;
     await this.sampleRepo.update(sample); // erro sobe: BullMQ reagenda
   }
+
+  // OBRIGATORIOS. O BullMQ sinaliza a falha apenas com `worker.emit(...)`; sem
+  // listener o evento e descartado e nada e logado. Um job que esgota `attempts`
+  // (ou um Redis com senha errada) fica invisivel.
+  @OnWorkerEvent('failed')
+  onFailed(job: Job<DeactivateSampleJobData> | undefined, error: Error): void {
+    this.logger.error(/* job.id, job.name, attemptsMade/attempts, error */);
+  }
+
+  @OnWorkerEvent('error')
+  onError(error: Error): void {
+    this.logger.error(/* erro interno/conexao do worker */);
+  }
 }
 ```
 
@@ -1005,6 +1039,8 @@ Regras que valem para qualquer worker:
 - Erro lancado consome uma tentativa e o BullMQ reagenda com o `backoff` do
   adapter. Nao capture o erro so para logar — engolir a excecao marca o job como
   concluido com sucesso.
+- `@OnWorkerEvent('failed')` e `@OnWorkerEvent('error')` sao obrigatorios: sem
+  eles falha definitiva de job e erro de conexao do worker nao geram log algum.
 - Situacao permanente (registro nao existe mais) retorna sem lancar: retry nunca
   fara o registro aparecer.
 - O job leva `tenantId` porque o worker roda fora do request e nao tem o
@@ -1022,9 +1058,11 @@ if (!podeRodarAgora) {
 ```
 
 `await sleep(...)` esta errado: o worker tem um numero fixo de slots de
-concorrencia e dormir ocupa um slot inteiro sem fazer nada; alem disso o Redis
-marca como _stalled_ o job cujo lock nao e renovado e o entrega a outro worker,
-duplicando o processamento. `job.token` e obrigatorio no `moveToDelayed`.
+concorrencia e dormir ocupa um slot inteiro sem fazer nada — com poucos jobs
+bloqueados a fila para mesmo havendo trabalho pronto. (Um `await` longo nao torna
+o job _stalled_: o BullMQ renova o lock em um timer proprio. Quem estoura o lock
+e bloqueio _sincrono_ do event loop ou queda do worker.) `job.token` e
+obrigatorio no `moveToDelayed`.
 
 ### 15.5 Wiring no modulo
 
@@ -1048,7 +1086,9 @@ export class SampleModule {}
 ### 15.6 Rota que enfileira
 
 Responda `202 Accepted`: o efeito pedido ainda nao aconteceu quando a resposta
-sai. Ver `POST /api/v1/samples/:id/deactivations` em
+sai. Documente tambem o `503` (`QUEUE_UNAVAILABLE`) que o adapter produz quando o
+broker esta fora — o cliente precisa saber que pode repetir a chamada. Ver
+`POST /api/v1/samples/:id/deactivations` em
 `src/sample/infrastructure/http/sample.controller.ts`.
 
 ### 15.7 Teste do processor

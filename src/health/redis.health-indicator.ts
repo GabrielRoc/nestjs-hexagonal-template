@@ -40,9 +40,11 @@ export class RedisHealthIndicator
       maxRetriesPerRequest: 1,
     });
 
-    // O ioredis so emite 'error' quando existe listener; sem este handler as
-    // falhas de conexao somem silenciosamente e o unico sinal fica sendo o
-    // timeout do PING.
+    // Sem listener de 'error' o ioredis nao fica calado: o `silentEmit` cai em
+    // `console.error('[ioredis] Unhandled error event:', error.stack)` a cada
+    // tentativa de reconexao, fora do formato JSON do AppLoggerService. Este
+    // handler existe para trazer a falha para o logger da app (nivel debug, o
+    // sinal que importa e o status do health check).
     this.client.on('error', (error: Error) => {
       this.logger.debug(`Redis connection error: ${error.message}`);
     });

@@ -102,6 +102,12 @@ export class SampleController {
     description: 'Sample nao encontrado',
     type: ErrorResponseSwagger,
   })
+  @ApiResponse({
+    status: 503,
+    description:
+      'Fila indisponivel (QUEUE_UNAVAILABLE): o job nao foi enfileirado e o cliente pode repetir a chamada',
+    type: ErrorResponseSwagger,
+  })
   async scheduleDeactivation(
     @Param('id') id: string,
     @TenantId() tenantId: string,

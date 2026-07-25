@@ -182,8 +182,19 @@ ligado ao Symbol e o processor como provider comum.
 
 Regras obrigatorias:
 
-- `maxRetriesPerRequest: null` na conexao — o worker usa comandos bloqueantes e
-  qualquer outro valor gera erro de conexao confuso.
+- **Nao** declare `maxRetriesPerRequest` na conexao compartilhada: o BullMQ ja
+  forca `null` na conexao bloqueante do worker (e nao emite aviso quando a chave
+  e omitida), enquanto no produtor `null` faz o `queue.add()` ficar pendurado no
+  request em vez de falhar.
+- Todo `add()` do adapter tem **timeout explicito** (`Promise.race`, ver
+  `sample-queue.adapter.ts`) e traduz o estouro em `QUEUE_UNAVAILABLE` /
+  `503`: com o Redis fora do ar a espera do `add()` nao termina e a resposta
+  HTTP nunca sai.
+- Todo processor registra `@OnWorkerEvent('failed')` e `@OnWorkerEvent('error')`
+  logando em `logger.error`: o BullMQ descarta esses eventos quando nao ha
+  listener, e job que esgota `attempts` desapareceria sem uma linha de log.
+- `backoff: { type: 'exponential', delay }` espera `2^(tentativa-1) * delay`;
+  `attempts: 3` produz 2 reagendamentos (com `delay: 30000`, 30s e 60s).
 - Payload de job carrega **somente identificadores** (`{ id, tenantId }`), nunca
   a entidade: o JSON fica parado no Redis e chega desatualizado.
 - Todo job leva `tenantId`: o worker roda fora do request e nao tem o
@@ -194,7 +205,8 @@ Regras obrigatorias:
 - Falha permanente (registro nao existe mais) retorna sem lancar erro.
 - Trabalho que nao pode rodar agora por motivo temporario (rate limit, janela de
   horario): `job.moveToDelayed(ts, job.token)` + `throw new DelayedError()`.
-  Nunca `sleep` — dormir ocupa um slot de concorrencia e o job vira _stalled_.
+  Nunca `sleep` — dormir ocupa um slot de concorrencia sem fazer nada e para a
+  fila (o lock em si continua sendo renovado pelo timer do BullMQ).
 - Rota que apenas enfileira responde `202 Accepted`.
 
 O shutdown ja e coberto: o `@nestjs/bullmq` fecha workers e queues no
