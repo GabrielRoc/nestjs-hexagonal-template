@@ -1,14 +1,16 @@
 import { HttpStatus } from '@nestjs/common';
-import EmailPassword from 'supertokens-node/recipe/emailpassword';
-import Session from 'supertokens-node/recipe/session';
 import { UpdateUserPasswordUseCase } from './update-user-password.use-case';
 import { User } from '../../domain/entities/user.entity';
 import type { UserRepositoryPort } from '../../domain/ports/user.repository.port';
+import type { AuthProviderPort } from '../../../auth/domain/ports/auth-provider.port';
 import { DomainException } from '../../../common/exceptions/domain.exception';
 import { ErrorCode } from '../../../common/enums/error-codes.enum';
 import { Role } from '../../../common/enums/role.enum';
 
 type UserRepoMock = jest.Mocked<Pick<UserRepositoryPort, 'findById'>>;
+type AuthProviderMock = jest.Mocked<
+  Pick<AuthProviderPort, 'updatePassword' | 'revokeAllSessions'>
+>;
 
 const TENANT_ID = 'tenant-1';
 const TARGET_ID = 'user-target';
@@ -31,27 +33,20 @@ function makeUser(overrides: Partial<User> = {}): User {
 describe('UpdateUserPasswordUseCase', () => {
   let useCase: UpdateUserPasswordUseCase;
   let repo: UserRepoMock;
-  let updateEmailOrPassword: jest.SpiedFunction<
-    typeof EmailPassword.updateEmailOrPassword
-  >;
-  let revokeAllSessionsForUser: jest.SpiedFunction<
-    typeof Session.revokeAllSessionsForUser
-  >;
+  let authProvider: AuthProviderMock;
 
   beforeEach(() => {
     repo = { findById: jest.fn() };
+    authProvider = {
+      updatePassword: jest.fn().mockResolvedValue({ status: 'OK' }),
+      revokeAllSessions: jest.fn().mockResolvedValue(undefined),
+    };
     useCase = new UpdateUserPasswordUseCase(
       repo as unknown as UserRepositoryPort,
+      authProvider as unknown as AuthProviderPort,
     );
     jest.spyOn(useCase['logger'], 'log').mockImplementation(() => undefined);
     jest.spyOn(useCase['logger'], 'warn').mockImplementation(() => undefined);
-    jest.spyOn(useCase['logger'], 'error').mockImplementation(() => undefined);
-    updateEmailOrPassword = jest
-      .spyOn(EmailPassword, 'updateEmailOrPassword')
-      .mockResolvedValue({ status: 'OK' });
-    revokeAllSessionsForUser = jest
-      .spyOn(Session, 'revokeAllSessionsForUser')
-      .mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -71,8 +66,8 @@ describe('UpdateUserPasswordUseCase', () => {
       httpStatus: HttpStatus.NOT_FOUND,
     });
 
-    expect(updateEmailOrPassword).not.toHaveBeenCalled();
-    expect(revokeAllSessionsForUser).not.toHaveBeenCalled();
+    expect(authProvider.updatePassword).not.toHaveBeenCalled();
+    expect(authProvider.revokeAllSessions).not.toHaveBeenCalled();
   });
 
   it('busca o usuario escopado pelo tenant antes de trocar a senha', async () => {
@@ -90,19 +85,15 @@ describe('UpdateUserPasswordUseCase', () => {
 
     await useCase.execute(TARGET_ID, TENANT_ID, NEW_PASSWORD);
 
-    expect(updateEmailOrPassword).toHaveBeenCalledTimes(1);
-    const input = updateEmailOrPassword.mock.calls[0][0];
-    expect(input.recipeUserId.getAsString()).toBe(SUPERTOKENS_ID);
-    expect(input.recipeUserId.getAsString()).not.toBe(TARGET_ID);
-    expect(input.password).toBe(NEW_PASSWORD);
-  });
-
-  it('nao envia email no payload para nao alterar o login do usuario', async () => {
-    repo.findById.mockResolvedValue(makeUser());
-
-    await useCase.execute(TARGET_ID, TENANT_ID, NEW_PASSWORD);
-
-    expect(updateEmailOrPassword.mock.calls[0][0].email).toBeUndefined();
+    expect(authProvider.updatePassword).toHaveBeenCalledTimes(1);
+    expect(authProvider.updatePassword).toHaveBeenCalledWith(
+      SUPERTOKENS_ID,
+      NEW_PASSWORD,
+    );
+    expect(authProvider.updatePassword).not.toHaveBeenCalledWith(
+      TARGET_ID,
+      NEW_PASSWORD,
+    );
   });
 
   it('revoga todas as sessoes do usuario depois da troca bem-sucedida', async () => {
@@ -112,16 +103,16 @@ describe('UpdateUserPasswordUseCase', () => {
       useCase.execute(TARGET_ID, TENANT_ID, NEW_PASSWORD),
     ).resolves.toBeUndefined();
 
-    expect(revokeAllSessionsForUser).toHaveBeenCalledWith(SUPERTOKENS_ID);
+    expect(authProvider.revokeAllSessions).toHaveBeenCalledWith(SUPERTOKENS_ID);
     expect(
-      revokeAllSessionsForUser.mock.invocationCallOrder[0],
-    ).toBeGreaterThan(updateEmailOrPassword.mock.invocationCallOrder[0]);
+      authProvider.revokeAllSessions.mock.invocationCallOrder[0],
+    ).toBeGreaterThan(authProvider.updatePassword.mock.invocationCallOrder[0]);
   });
 
-  it('mapeia UNKNOWN_USER_ID_ERROR para USER_NOT_FOUND e nao revoga sessoes', async () => {
+  it('mapeia id desconhecido no provedor para USER_NOT_FOUND e nao revoga sessoes', async () => {
     repo.findById.mockResolvedValue(makeUser());
-    updateEmailOrPassword.mockResolvedValue({
-      status: 'UNKNOWN_USER_ID_ERROR',
+    authProvider.updatePassword.mockResolvedValue({
+      status: 'UNKNOWN_USER_ID',
     });
 
     await expect(
@@ -131,30 +122,35 @@ describe('UpdateUserPasswordUseCase', () => {
       httpStatus: HttpStatus.NOT_FOUND,
     });
 
-    expect(revokeAllSessionsForUser).not.toHaveBeenCalled();
+    expect(authProvider.revokeAllSessions).not.toHaveBeenCalled();
   });
 
-  it('mapeia PASSWORD_POLICY_VIOLATED_ERROR para 400 e nao revoga sessoes', async () => {
+  it('mapeia violacao de politica para 400 e devolve a regra que falhou em details', async () => {
     repo.findById.mockResolvedValue(makeUser());
-    updateEmailOrPassword.mockResolvedValue({
-      status: 'PASSWORD_POLICY_VIOLATED_ERROR',
-      failureReason: 'Password must contain at least one number',
+    authProvider.updatePassword.mockResolvedValue({
+      status: 'POLICY_VIOLATED',
+      failureReason: 'Deve conter pelo menos um número',
     });
 
-    await expect(
-      useCase.execute(TARGET_ID, TENANT_ID, NEW_PASSWORD),
-    ).rejects.toMatchObject({
+    const error = await useCase
+      .execute(TARGET_ID, TENANT_ID, NEW_PASSWORD)
+      .catch((thrown: DomainException) => thrown);
+
+    expect(error).toMatchObject({
       code: ErrorCode.USER_PASSWORD_POLICY_VIOLATED,
       httpStatus: HttpStatus.BAD_REQUEST,
     });
-
-    expect(revokeAllSessionsForUser).not.toHaveBeenCalled();
+    expect((error as DomainException).details).toEqual([
+      { field: 'newPassword', message: 'Deve conter pelo menos um número' },
+    ]);
+    expect(authProvider.revokeAllSessions).not.toHaveBeenCalled();
   });
 
   it('trata status inesperado do provedor como 500 e nao revoga sessoes', async () => {
     repo.findById.mockResolvedValue(makeUser());
-    updateEmailOrPassword.mockResolvedValue({
-      status: 'EMAIL_ALREADY_EXISTS_ERROR',
+    authProvider.updatePassword.mockResolvedValue({
+      status: 'UNEXPECTED',
+      detail: 'EMAIL_ALREADY_EXISTS_ERROR',
     });
 
     await expect(
@@ -164,14 +160,16 @@ describe('UpdateUserPasswordUseCase', () => {
       httpStatus: HttpStatus.INTERNAL_SERVER_ERROR,
     });
 
-    expect(revokeAllSessionsForUser).not.toHaveBeenCalled();
+    expect(authProvider.revokeAllSessions).not.toHaveBeenCalled();
   });
 
   it('propaga a falha quando a revogacao de sessoes nao acontece', async () => {
     // A senha ja mudou: se a revogacao falhar, o chamador precisa saber que as
     // sessoes antigas continuam validas.
     repo.findById.mockResolvedValue(makeUser());
-    revokeAllSessionsForUser.mockRejectedValue(new Error('supertokens down'));
+    authProvider.revokeAllSessions.mockRejectedValue(
+      new Error('supertokens down'),
+    );
 
     await expect(
       useCase.execute(TARGET_ID, TENANT_ID, NEW_PASSWORD),

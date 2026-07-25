@@ -23,22 +23,24 @@ export class UpdateUserUseCase {
     currentUserId: string,
     dto: UpdateUserDto,
   ): Promise<UserResponseDto> {
+    // Escalonamento de privilegio: um admin nao pode promover a si mesmo nem se
+    // rebaixar para escapar de uma regra que dependa do proprio role. A checagem
+    // vem antes de qualquer I/O, como em SetUserActiveUseCase e
+    // DeleteUserUseCase: o veredito depende apenas do dto e dos dois ids.
+    if (dto.role && userId === currentUserId) {
+      throw new DomainException(
+        ErrorCode.USER_CANNOT_CHANGE_OWN_ROLE,
+        'Não é possível alterar o próprio papel',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const user = await this.userRepo.findById(userId, tenantId);
     if (!user) {
       throw new DomainException(
         ErrorCode.USER_NOT_FOUND,
         'Usuário não encontrado',
         HttpStatus.NOT_FOUND,
-      );
-    }
-
-    // Escalonamento de privilegio: um admin nao pode promover a si mesmo nem se
-    // rebaixar para escapar de uma regra que dependa do proprio role.
-    if (dto.role && userId === currentUserId) {
-      throw new DomainException(
-        ErrorCode.USER_CANNOT_CHANGE_OWN_ROLE,
-        'Não é possível alterar o próprio papel',
-        HttpStatus.FORBIDDEN,
       );
     }
 
@@ -58,7 +60,7 @@ export class UpdateUserUseCase {
    *
    * A regra vale apenas para um admin ATIVO: countActiveAdminsByTenantId nao
    * conta admins inativos, entao rebaixar um admin inativo nao muda a contagem
-   * e nao pode trancar o tenant (mesmo criterio de ToggleUserActiveUseCase).
+   * e nao pode trancar o tenant (mesmo criterio de SetUserActiveUseCase).
    */
   private async assertNotLastAdmin(
     user: User,

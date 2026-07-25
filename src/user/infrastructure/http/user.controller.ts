@@ -6,13 +6,13 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import {
   ApiTags,
+  ApiBody,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -20,8 +20,14 @@ import {
   ApiExtraModels,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { Roles, CurrentUser, TenantId } from '../../../common/decorators';
+import {
+  Roles,
+  CurrentUser,
+  SkipAuditBody,
+  TenantId,
+} from '../../../common/decorators';
 import { Role } from '../../../common/enums/role.enum';
+import { UuidParamPipe } from '../../../common/pipes/uuid-param.pipe';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import {
   ErrorResponseSwagger,
@@ -29,11 +35,15 @@ import {
 } from '../../../common/swagger/common.swagger';
 import {
   createUserSchema,
+  setUserActiveSchema,
+  SetUserActiveSwagger,
   updateUserSchema,
   updateUserPasswordSchema,
+  UpdateUserPasswordSwagger,
 } from '../../application/dtos/user.dto';
 import type {
   CreateUserDto,
+  SetUserActiveDto,
   UpdateUserDto,
   UpdateUserPasswordDto,
 } from '../../application/dtos/user.dto';
@@ -43,7 +53,7 @@ import { GetCurrentUserUseCase } from '../../application/use-cases/get-current-u
 import { ListUsersUseCase } from '../../application/use-cases/list-users.use-case';
 import { UpdateUserUseCase } from '../../application/use-cases/update-user.use-case';
 import { UpdateUserPasswordUseCase } from '../../application/use-cases/update-user-password.use-case';
-import { ToggleUserActiveUseCase } from '../../application/use-cases/toggle-user-active.use-case';
+import { SetUserActiveUseCase } from '../../application/use-cases/set-user-active.use-case';
 import { DeleteUserUseCase } from '../../application/use-cases/delete-user.use-case';
 
 @ApiTags('Users')
@@ -55,7 +65,7 @@ export class UserController {
     private readonly listUsersUseCase: ListUsersUseCase,
     private readonly updateUserUseCase: UpdateUserUseCase,
     private readonly updateUserPasswordUseCase: UpdateUserPasswordUseCase,
-    private readonly toggleUserActiveUseCase: ToggleUserActiveUseCase,
+    private readonly setUserActiveUseCase: SetUserActiveUseCase,
     private readonly deleteUserUseCase: DeleteUserUseCase,
   ) {}
 
@@ -143,7 +153,7 @@ export class UserController {
     type: ErrorResponseSwagger,
   })
   async update(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', UuidParamPipe) id: string,
     @Body(new ZodValidationPipe(updateUserSchema)) dto: UpdateUserDto,
     @TenantId() tenantId: string,
     @CurrentUser() currentUser: RequestUser,
@@ -159,8 +169,12 @@ export class UserController {
 
   @Patch(':id/password')
   @Roles(Role.ADMIN)
+  // O corpo existe apenas para transportar a senha: nada dele vai para
+  // audit_logs (o interceptor global ja redige, isto e a segunda camada).
+  @SkipAuditBody()
   @ApiOperation({ summary: 'Update a user password' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
+  @ApiBody({ type: UpdateUserPasswordSwagger })
   @ApiResponse({
     status: 400,
     description: 'Senha fora da política de segurança',
@@ -172,7 +186,7 @@ export class UserController {
     type: ErrorResponseSwagger,
   })
   async updatePassword(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', UuidParamPipe) id: string,
     @Body(new ZodValidationPipe(updateUserPasswordSchema))
     dto: UpdateUserPasswordDto,
     @TenantId() tenantId: string,
@@ -181,10 +195,13 @@ export class UserController {
     return { data: { message: 'Senha atualizada com sucesso' } };
   }
 
-  @Patch(':id/toggle-active')
+  // Estado desejado no corpo, nao toggle: repetir a requisicao apos uma falha
+  // parcial precisa reexecutar a mesma intencao, nunca invertê-la.
+  @Patch(':id/active')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Toggle a user active status' })
+  @ApiOperation({ summary: 'Activate or deactivate a user (idempotent)' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
+  @ApiBody({ type: SetUserActiveSwagger })
   @ApiResponse({
     status: 403,
     description: 'Autodesativação ou último administrador ativo',
@@ -195,15 +212,17 @@ export class UserController {
     description: 'Usuário não encontrado',
     type: ErrorResponseSwagger,
   })
-  async toggleActive(
-    @Param('id', ParseUUIDPipe) id: string,
+  async setActive(
+    @Param('id', UuidParamPipe) id: string,
+    @Body(new ZodValidationPipe(setUserActiveSchema)) dto: SetUserActiveDto,
     @TenantId() tenantId: string,
     @CurrentUser() currentUser: RequestUser,
   ) {
-    const user = await this.toggleUserActiveUseCase.execute(
+    const user = await this.setUserActiveUseCase.execute(
       id,
       tenantId,
       currentUser.userId,
+      dto.isActive,
     );
     return { data: user };
   }
@@ -211,7 +230,13 @@ export class UserController {
   @Delete(':id')
   @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Soft delete a user' })
+  @ApiOperation({
+    summary: 'Delete a user',
+    description:
+      'Remove a identidade no provedor de autenticação (irreversível) e ' +
+      'marca o registro local com deletedAt. Não há restore: reativar o ' +
+      'acesso exige criar o usuário novamente.',
+  })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @ApiResponse({
     status: 403,
@@ -224,7 +249,7 @@ export class UserController {
     type: ErrorResponseSwagger,
   })
   async remove(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', UuidParamPipe) id: string,
     @TenantId() tenantId: string,
     @CurrentUser() currentUser: RequestUser,
   ) {

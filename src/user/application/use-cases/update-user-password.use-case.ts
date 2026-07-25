@@ -1,11 +1,13 @@
 import { Inject, Injectable, HttpStatus, Logger } from '@nestjs/common';
-import { convertToRecipeUserId } from 'supertokens-node';
-import EmailPassword from 'supertokens-node/recipe/emailpassword';
-import Session from 'supertokens-node/recipe/session';
 import {
   USER_REPOSITORY,
   type UserRepositoryPort,
 } from '../../domain/ports/user.repository.port';
+import {
+  AUTH_PROVIDER,
+  type AuthProviderPort,
+} from '../../../auth/domain/ports/auth-provider.port';
+import { PasswordUpdateResultMapper } from '../../../auth/application/mappers/password-update-result.mapper';
 import { DomainException } from '../../../common/exceptions/domain.exception';
 import { ErrorCode } from '../../../common/enums/error-codes.enum';
 
@@ -16,6 +18,8 @@ export class UpdateUserPasswordUseCase {
   constructor(
     @Inject(USER_REPOSITORY)
     private readonly userRepo: UserRepositoryPort,
+    @Inject(AUTH_PROVIDER)
+    private readonly authProvider: AuthProviderPort,
   ) {}
 
   async execute(
@@ -34,50 +38,22 @@ export class UpdateUserPasswordUseCase {
       );
     }
 
-    const result = await EmailPassword.updateEmailOrPassword({
-      recipeUserId: convertToRecipeUserId(user.supertokensUserId),
-      password: newPassword,
-    });
-
-    if (result.status === 'OK') {
-      // Senha trocada por um administrador: as sessoes abertas com a senha
-      // antiga precisam morrer junto.
-      await Session.revokeAllSessionsForUser(user.supertokensUserId);
-      this.logger.log(
-        `Password updated and sessions revoked for user ${userId}`,
-      );
-      return;
-    }
-
-    if (result.status === 'UNKNOWN_USER_ID_ERROR') {
-      this.logger.warn(
-        `Password update failed for user ${userId}: unknown user in auth provider`,
-      );
-      throw new DomainException(
-        ErrorCode.USER_NOT_FOUND,
-        'Usuário não encontrado no provedor de autenticação',
-        HttpStatus.NOT_FOUND,
-      );
-    }
-
-    if (result.status === 'PASSWORD_POLICY_VIOLATED_ERROR') {
-      this.logger.warn(
-        `Password update failed for user ${userId}: password policy violated`,
-      );
-      throw new DomainException(
-        ErrorCode.USER_PASSWORD_POLICY_VIOLATED,
-        'A senha não atende aos requisitos mínimos de segurança',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    this.logger.error(
-      `Failed to update password for user ${userId}: ${result.status}`,
+    const result = await this.authProvider.updatePassword(
+      user.supertokensUserId,
+      newPassword,
     );
-    throw new DomainException(
-      ErrorCode.USER_PASSWORD_UPDATE_FAILED,
-      'Falha ao atualizar a senha',
-      HttpStatus.INTERNAL_SERVER_ERROR,
-    );
+    if (result.status !== 'OK') {
+      this.logger.warn(
+        `Password update failed for user ${userId}: ${result.status}`,
+      );
+      // Mapeamento compartilhado com o reset self-service: um unico lugar decide
+      // qual status do provedor vira 404, 400 ou 500.
+      throw PasswordUpdateResultMapper.toException(result);
+    }
+
+    // Senha trocada por um administrador: as sessoes abertas com a senha antiga
+    // precisam morrer junto.
+    await this.authProvider.revokeAllSessions(user.supertokensUserId);
+    this.logger.log(`Password updated and sessions revoked for user ${userId}`);
   }
 }

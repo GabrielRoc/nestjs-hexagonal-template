@@ -1,9 +1,8 @@
 import { HttpStatus } from '@nestjs/common';
-import * as supertokens from 'supertokens-node';
-import Session from 'supertokens-node/recipe/session';
 import { DeleteUserUseCase } from './delete-user.use-case';
 import { User } from '../../domain/entities/user.entity';
 import type { UserRepositoryPort } from '../../domain/ports/user.repository.port';
+import type { AuthProviderPort } from '../../../auth/domain/ports/auth-provider.port';
 import { DomainException } from '../../../common/exceptions/domain.exception';
 import { ErrorCode } from '../../../common/enums/error-codes.enum';
 import { Role } from '../../../common/enums/role.enum';
@@ -13,6 +12,9 @@ type UserRepoMock = jest.Mocked<
     UserRepositoryPort,
     'findById' | 'softDelete' | 'countActiveAdminsByTenantId'
   >
+>;
+type AuthProviderMock = jest.Mocked<
+  Pick<AuthProviderPort, 'revokeAllSessions' | 'deleteUser'>
 >;
 
 const TENANT_ID = 'tenant-1';
@@ -36,25 +38,23 @@ function makeUser(overrides: Partial<User> = {}): User {
 describe('DeleteUserUseCase', () => {
   let useCase: DeleteUserUseCase;
   let repo: UserRepoMock;
-  let deleteUser: jest.SpiedFunction<typeof supertokens.deleteUser>;
-  let revokeAllSessionsForUser: jest.SpiedFunction<
-    typeof Session.revokeAllSessionsForUser
-  >;
+  let authProvider: AuthProviderMock;
 
   beforeEach(() => {
     repo = {
       findById: jest.fn(),
-      softDelete: jest.fn(),
+      softDelete: jest.fn().mockResolvedValue(undefined),
       countActiveAdminsByTenantId: jest.fn(),
     };
-    useCase = new DeleteUserUseCase(repo as unknown as UserRepositoryPort);
+    authProvider = {
+      revokeAllSessions: jest.fn().mockResolvedValue(undefined),
+      deleteUser: jest.fn().mockResolvedValue(undefined),
+    };
+    useCase = new DeleteUserUseCase(
+      repo as unknown as UserRepositoryPort,
+      authProvider as unknown as AuthProviderPort,
+    );
     jest.spyOn(useCase['logger'], 'log').mockImplementation(() => undefined);
-    deleteUser = jest
-      .spyOn(supertokens, 'deleteUser')
-      .mockResolvedValue({ status: 'OK' });
-    revokeAllSessionsForUser = jest
-      .spyOn(Session, 'revokeAllSessionsForUser')
-      .mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -74,7 +74,7 @@ describe('DeleteUserUseCase', () => {
 
     expect(repo.findById).not.toHaveBeenCalled();
     expect(repo.softDelete).not.toHaveBeenCalled();
-    expect(deleteUser).not.toHaveBeenCalled();
+    expect(authProvider.deleteUser).not.toHaveBeenCalled();
   });
 
   it('lanca USER_NOT_FOUND quando o usuario nao existe no tenant', async () => {
@@ -87,10 +87,9 @@ describe('DeleteUserUseCase', () => {
       httpStatus: HttpStatus.NOT_FOUND,
     });
 
-    expect(repo.findById).toHaveBeenCalledWith(TARGET_ID, TENANT_ID);
     expect(repo.softDelete).not.toHaveBeenCalled();
-    expect(revokeAllSessionsForUser).not.toHaveBeenCalled();
-    expect(deleteUser).not.toHaveBeenCalled();
+    expect(authProvider.revokeAllSessions).not.toHaveBeenCalled();
+    expect(authProvider.deleteUser).not.toHaveBeenCalled();
   });
 
   it('recusa excluir o ultimo administrador ativo do tenant', async () => {
@@ -108,7 +107,7 @@ describe('DeleteUserUseCase', () => {
 
     expect(repo.countActiveAdminsByTenantId).toHaveBeenCalledWith(TENANT_ID);
     expect(repo.softDelete).not.toHaveBeenCalled();
-    expect(deleteUser).not.toHaveBeenCalled();
+    expect(authProvider.deleteUser).not.toHaveBeenCalled();
   });
 
   it('exclui um admin quando o tenant ainda tem outro administrador ativo', async () => {
@@ -143,26 +142,45 @@ describe('DeleteUserUseCase', () => {
     expect(repo.countActiveAdminsByTenantId).not.toHaveBeenCalled();
   });
 
-  it('revoga as sessoes e remove a conta no provedor pelo id do SuperTokens', async () => {
+  it('revoga as sessoes e remove a conta no provedor pelo id do provedor', async () => {
     repo.findById.mockResolvedValue(makeUser());
 
     await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID);
 
-    expect(revokeAllSessionsForUser).toHaveBeenCalledWith(SUPERTOKENS_ID);
-    expect(deleteUser).toHaveBeenCalledWith(SUPERTOKENS_ID);
+    expect(authProvider.revokeAllSessions).toHaveBeenCalledWith(SUPERTOKENS_ID);
+    expect(authProvider.deleteUser).toHaveBeenCalledWith(SUPERTOKENS_ID);
   });
 
-  it('faz o soft delete local antes de remover a conta no provedor', async () => {
-    // A linha local e a fonte de verdade do acesso: se a chamada ao provedor
-    // falhar, o usuario ja esta sem acesso a aplicacao.
+  it('limpa o provedor ANTES do soft delete local', async () => {
+    // O passo local e o unico transacional: comita-lo primeiro tornava a
+    // operacao irrepetivel, porque findById nao ve linha soft-deleted.
     repo.findById.mockResolvedValue(makeUser());
 
     await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID);
 
-    expect(repo.softDelete.mock.invocationCallOrder[0]).toBeLessThan(
-      deleteUser.mock.invocationCallOrder[0],
+    expect(authProvider.deleteUser.mock.invocationCallOrder[0]).toBeLessThan(
+      repo.softDelete.mock.invocationCallOrder[0],
     );
   });
+
+  it.each([
+    ['revogacao de sessoes', 'revokeAllSessions'],
+    ['remocao da identidade', 'deleteUser'],
+  ] as const)(
+    'nao marca deletedAt quando a %s falha, mantendo a exclusao repetivel',
+    async (_label, method) => {
+      // Sem isto o estado final era: linha soft-deleted + conta viva no
+      // provedor, e todo DELETE seguinte respondia 404 — conta orfa para sempre.
+      repo.findById.mockResolvedValue(makeUser());
+      authProvider[method].mockRejectedValue(new Error('supertokens down'));
+
+      await expect(
+        useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID),
+      ).rejects.toThrow('supertokens down');
+
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    },
+  );
 
   it('exclui apenas dentro do tenant da requisicao', async () => {
     repo.findById.mockResolvedValue(makeUser());

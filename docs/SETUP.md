@@ -192,6 +192,8 @@ curl -X POST http://localhost:3567/recipe/dashboard/user \
 
 3. Faca login no dashboard e crie um novo usuario da aplicacao com email e senha
 
+> A senha precisa atender a politica registrada em `EmailPassword.init()` (`src/auth/auth.module.ts`): 8 a 99 caracteres, com ao menos uma letra maiuscula, uma minuscula e um numero. A regra vive em `src/common/validation/password.schema.ts` e vale para o dashboard, para as rotas nativas do SuperTokens e para `POST /api/v1/auth/reset-password`.
+
 4. Copie o **User ID** gerado pelo SuperTokens
 
 5. (Opcional) Para tornar este usuario superadmin, adicione o ID na variavel `SUPERADMIN_SUPERTOKENS_IDS` no `.env`:

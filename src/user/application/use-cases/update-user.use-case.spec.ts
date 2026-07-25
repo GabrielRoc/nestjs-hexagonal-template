@@ -76,10 +76,8 @@ describe('UpdateUserUseCase', () => {
   });
 
   it('recusa alterar o proprio papel antes de tocar no repositorio', async () => {
-    repo.findById.mockResolvedValue(
-      makeUser({ id: CURRENT_ID, role: Role.ADMIN }),
-    );
-
+    // O veredito depende so do dto e dos dois ids, entao nao ha SELECT antes —
+    // mesma ordem de SetUserActiveUseCase e DeleteUserUseCase.
     await expect(
       useCase.execute(CURRENT_ID, TENANT_ID, CURRENT_ID, { role: Role.USER }),
     ).rejects.toMatchObject({
@@ -87,15 +85,12 @@ describe('UpdateUserUseCase', () => {
       httpStatus: HttpStatus.FORBIDDEN,
     });
 
+    expect(repo.findById).not.toHaveBeenCalled();
     expect(repo.countActiveAdminsByTenantId).not.toHaveBeenCalled();
     expect(repo.update).not.toHaveBeenCalled();
   });
 
   it('recusa o proprio papel mesmo quando o role enviado e o que ja esta em vigor', async () => {
-    repo.findById.mockResolvedValue(
-      makeUser({ id: CURRENT_ID, role: Role.ADMIN }),
-    );
-
     await expect(
       useCase.execute(CURRENT_ID, TENANT_ID, CURRENT_ID, { role: Role.ADMIN }),
     ).rejects.toMatchObject({

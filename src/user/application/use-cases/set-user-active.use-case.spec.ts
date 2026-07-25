@@ -1,8 +1,8 @@
 import { HttpStatus } from '@nestjs/common';
-import Session from 'supertokens-node/recipe/session';
-import { ToggleUserActiveUseCase } from './toggle-user-active.use-case';
+import { SetUserActiveUseCase } from './set-user-active.use-case';
 import { User } from '../../domain/entities/user.entity';
 import type { UserRepositoryPort } from '../../domain/ports/user.repository.port';
+import type { AuthProviderPort } from '../../../auth/domain/ports/auth-provider.port';
 import { DomainException } from '../../../common/exceptions/domain.exception';
 import { ErrorCode } from '../../../common/enums/error-codes.enum';
 import { Role } from '../../../common/enums/role.enum';
@@ -13,16 +13,20 @@ type UserRepoMock = jest.Mocked<
     'findById' | 'update' | 'countActiveAdminsByTenantId'
   >
 >;
+type AuthProviderMock = jest.Mocked<
+  Pick<AuthProviderPort, 'revokeAllSessions'>
+>;
 
 const TENANT_ID = 'tenant-1';
 const TARGET_ID = 'user-target';
 const CURRENT_ID = 'user-current';
+const SUPERTOKENS_ID = 'st-target';
 
 function makeUser(overrides: Partial<User> = {}): User {
   return new User({
     id: TARGET_ID,
     tenantId: TENANT_ID,
-    supertokensUserId: 'st-target',
+    supertokensUserId: SUPERTOKENS_ID,
     name: 'Alvo',
     email: 'alvo@example.com',
     role: Role.USER,
@@ -31,24 +35,25 @@ function makeUser(overrides: Partial<User> = {}): User {
   });
 }
 
-describe('ToggleUserActiveUseCase', () => {
-  let useCase: ToggleUserActiveUseCase;
+describe('SetUserActiveUseCase', () => {
+  let useCase: SetUserActiveUseCase;
   let repo: UserRepoMock;
-  let revokeAllSessionsForUser: jest.SpyInstance;
+  let authProvider: AuthProviderMock;
 
   beforeEach(() => {
     repo = {
       findById: jest.fn(),
-      update: jest.fn(),
+      update: jest.fn((user: User) => Promise.resolve(user)),
       countActiveAdminsByTenantId: jest.fn(),
     };
-    useCase = new ToggleUserActiveUseCase(
+    authProvider = {
+      revokeAllSessions: jest.fn().mockResolvedValue(undefined),
+    };
+    useCase = new SetUserActiveUseCase(
       repo as unknown as UserRepositoryPort,
+      authProvider as unknown as AuthProviderPort,
     );
     jest.spyOn(useCase['logger'], 'log').mockImplementation(() => undefined);
-    revokeAllSessionsForUser = jest
-      .spyOn(Session, 'revokeAllSessionsForUser')
-      .mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -57,10 +62,10 @@ describe('ToggleUserActiveUseCase', () => {
 
   it('recusa a desativacao da propria conta antes de tocar no repositorio', async () => {
     await expect(
-      useCase.execute(CURRENT_ID, TENANT_ID, CURRENT_ID),
+      useCase.execute(CURRENT_ID, TENANT_ID, CURRENT_ID, false),
     ).rejects.toBeInstanceOf(DomainException);
     await expect(
-      useCase.execute(CURRENT_ID, TENANT_ID, CURRENT_ID),
+      useCase.execute(CURRENT_ID, TENANT_ID, CURRENT_ID, false),
     ).rejects.toMatchObject({
       code: ErrorCode.USER_CANNOT_DEACTIVATE_SELF,
       httpStatus: HttpStatus.FORBIDDEN,
@@ -68,14 +73,14 @@ describe('ToggleUserActiveUseCase', () => {
 
     expect(repo.findById).not.toHaveBeenCalled();
     expect(repo.update).not.toHaveBeenCalled();
-    expect(revokeAllSessionsForUser).not.toHaveBeenCalled();
+    expect(authProvider.revokeAllSessions).not.toHaveBeenCalled();
   });
 
   it('lanca USER_NOT_FOUND quando o usuario nao existe no tenant', async () => {
     repo.findById.mockResolvedValue(null);
 
     await expect(
-      useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID),
+      useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID, false),
     ).rejects.toMatchObject({
       code: ErrorCode.USER_NOT_FOUND,
       httpStatus: HttpStatus.NOT_FOUND,
@@ -83,7 +88,7 @@ describe('ToggleUserActiveUseCase', () => {
 
     expect(repo.findById).toHaveBeenCalledWith(TARGET_ID, TENANT_ID);
     expect(repo.update).not.toHaveBeenCalled();
-    expect(revokeAllSessionsForUser).not.toHaveBeenCalled();
+    expect(authProvider.revokeAllSessions).not.toHaveBeenCalled();
   });
 
   it('recusa desativar o ultimo administrador ativo do tenant', async () => {
@@ -93,7 +98,7 @@ describe('ToggleUserActiveUseCase', () => {
     repo.countActiveAdminsByTenantId.mockResolvedValue(1);
 
     await expect(
-      useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID),
+      useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID, false),
     ).rejects.toMatchObject({
       code: ErrorCode.USER_LAST_ADMIN,
       httpStatus: HttpStatus.FORBIDDEN,
@@ -101,7 +106,7 @@ describe('ToggleUserActiveUseCase', () => {
 
     expect(repo.countActiveAdminsByTenantId).toHaveBeenCalledWith(TENANT_ID);
     expect(repo.update).not.toHaveBeenCalled();
-    expect(revokeAllSessionsForUser).not.toHaveBeenCalled();
+    expect(authProvider.revokeAllSessions).not.toHaveBeenCalled();
   });
 
   it('desativa um administrador quando o tenant ainda tem outro ativo', async () => {
@@ -109,9 +114,13 @@ describe('ToggleUserActiveUseCase', () => {
       makeUser({ role: Role.ADMIN, isActive: true }),
     );
     repo.countActiveAdminsByTenantId.mockResolvedValue(2);
-    repo.update.mockImplementation((user) => Promise.resolve(user));
 
-    const result = await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID);
+    const result = await useCase.execute(
+      TARGET_ID,
+      TENANT_ID,
+      CURRENT_ID,
+      false,
+    );
 
     expect(result.isActive).toBe(false);
     expect(repo.update).toHaveBeenCalledWith(
@@ -119,22 +128,57 @@ describe('ToggleUserActiveUseCase', () => {
     );
   });
 
-  it('revoga todas as sessoes do usuario desativado', async () => {
+  it('revoga as sessoes ANTES de persistir a desativacao', async () => {
+    // Se a revogacao falhar, nada foi comitado: repetir a requisicao reexecuta a
+    // revogacao em vez de deixar a linha inativa com sessao viva.
     repo.findById.mockResolvedValue(makeUser({ isActive: true }));
-    repo.update.mockImplementation((user) => Promise.resolve(user));
 
-    await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID);
+    await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID, false);
 
-    expect(revokeAllSessionsForUser).toHaveBeenCalledWith('st-target');
+    expect(authProvider.revokeAllSessions).toHaveBeenCalledWith(SUPERTOKENS_ID);
+    expect(
+      authProvider.revokeAllSessions.mock.invocationCallOrder[0],
+    ).toBeLessThan(repo.update.mock.invocationCallOrder[0]);
+  });
+
+  it('nao persiste quando a revogacao de sessoes falha', async () => {
+    repo.findById.mockResolvedValue(makeUser({ isActive: true }));
+    authProvider.revokeAllSessions.mockRejectedValue(
+      new Error('supertokens down'),
+    );
+
+    await expect(
+      useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID, false),
+    ).rejects.toThrow('supertokens down');
+
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  it('repetir a desativacao de um usuario ja inativo revoga de novo, sem reativar', async () => {
+    // Este e o retry depois de uma falha parcial: a operacao recebe o estado
+    // desejado, entao a segunda chamada nao pode inverter nada.
+    repo.findById.mockResolvedValue(makeUser({ isActive: false }));
+
+    const result = await useCase.execute(
+      TARGET_ID,
+      TENANT_ID,
+      CURRENT_ID,
+      false,
+    );
+
+    expect(result.isActive).toBe(false);
+    expect(authProvider.revokeAllSessions).toHaveBeenCalledWith(SUPERTOKENS_ID);
+    expect(repo.update).toHaveBeenCalledWith(
+      expect.objectContaining({ isActive: false }),
+    );
   });
 
   it('nao consulta a contagem de admins ao desativar um usuario comum', async () => {
     repo.findById.mockResolvedValue(
       makeUser({ role: Role.USER, isActive: true }),
     );
-    repo.update.mockImplementation((user) => Promise.resolve(user));
 
-    await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID);
+    await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID, false);
 
     expect(repo.countActiveAdminsByTenantId).not.toHaveBeenCalled();
   });
@@ -143,9 +187,13 @@ describe('ToggleUserActiveUseCase', () => {
     repo.findById.mockResolvedValue(
       makeUser({ role: Role.ADMIN, isActive: false }),
     );
-    repo.update.mockImplementation((user) => Promise.resolve(user));
 
-    const result = await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID);
+    const result = await useCase.execute(
+      TARGET_ID,
+      TENANT_ID,
+      CURRENT_ID,
+      true,
+    );
 
     expect(result.isActive).toBe(true);
     expect(repo.countActiveAdminsByTenantId).not.toHaveBeenCalled();
@@ -153,18 +201,16 @@ describe('ToggleUserActiveUseCase', () => {
 
   it('nao revoga sessoes ao reativar um usuario', async () => {
     repo.findById.mockResolvedValue(makeUser({ isActive: false }));
-    repo.update.mockImplementation((user) => Promise.resolve(user));
 
-    await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID);
+    await useCase.execute(TARGET_ID, TENANT_ID, CURRENT_ID, true);
 
-    expect(revokeAllSessionsForUser).not.toHaveBeenCalled();
+    expect(authProvider.revokeAllSessions).not.toHaveBeenCalled();
   });
 
   it('busca o usuario sempre escopado pelo tenant da requisicao', async () => {
     repo.findById.mockResolvedValue(makeUser());
-    repo.update.mockImplementation((user) => Promise.resolve(user));
 
-    await useCase.execute(TARGET_ID, 'outro-tenant', CURRENT_ID);
+    await useCase.execute(TARGET_ID, 'outro-tenant', CURRENT_ID, false);
 
     expect(repo.findById).toHaveBeenCalledWith(TARGET_ID, 'outro-tenant');
   });
