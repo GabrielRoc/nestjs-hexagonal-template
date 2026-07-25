@@ -4,6 +4,7 @@ import { SuperTokensModule } from 'supertokens-nestjs';
 import Session from 'supertokens-node/recipe/session';
 import EmailPassword from 'supertokens-node/recipe/emailpassword';
 import Dashboard from 'supertokens-node/recipe/dashboard';
+import { AntiBotModule } from '../anti-bot/infrastructure/anti-bot.module';
 import { validatePasswordPolicy } from '../common/validation/password.schema';
 import { AUTH_PROVIDER } from './domain/ports/auth-provider.port';
 import { ForgotPasswordUseCase } from './application/use-cases/forgot-password.use-case';
@@ -14,6 +15,11 @@ import { SupertokensAuthProviderAdapter } from './infrastructure/supertokens-aut
 @Module({
   controllers: [AuthController],
   imports: [
+    // O AuthController usa `@UseGuards(TurnstileGuard)`. Guards de rota resolvem
+    // suas dependencias no injector do modulo do controller, entao sem este
+    // import o boot falha com "Nest can't resolve dependencies of the
+    // TurnstileGuard".
+    AntiBotModule,
     SuperTokensModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
