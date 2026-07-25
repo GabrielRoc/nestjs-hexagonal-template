@@ -350,7 +350,8 @@ Itens que o template nao resolve sozinho e precisam existir no ambiente de deplo
 - **`TRUST_PROXY_HOPS` igual ao numero de proxies na frente da app.** Sem isso o throttler usa o IP do balanceador e todos os clientes dividem o mesmo balde. Nunca defina um valor maior que o numero real de proxies: `X-Forwarded-For` passa a ser falsificavel.
 - **Storage compartilhado para o throttler, se rodar mais de uma replica.** O default e in-memory por processo: o limite efetivo vira `THROTTLE_LIMIT` x numero de processos e zera a cada restart.
 - **`ANTI_BOT_TOKEN_SECRET` definido, se alguma rota usa `@AntiBot()`.** Sem a variavel a app gera uma chave aleatoria por processo e registra `ERROR` no boot: os form tokens deixam de valer no restart e nao validam entre instancias, entao parte das submissoes legitimas e rejeitada. O registro de tokens usados tambem e in-memory por processo — para uso unico global, ligue um `TOKEN_STORE` compartilhado (ver `src/anti-bot/infrastructure/persistence/token-store.provider.ts`).
-- **`s3:ListBucket` na role/usuario IAM da aplicacao, alem de `s3:PutObject`, `s3:GetObject` e `s3:DeleteObject`.** O check de storage do `GET /api/health` usa `HeadBucketCommand`, que exige `s3:ListBucket` sobre o bucket. Uma politica de menor privilegio so com as tres permissoes de objeto faz o health responder **503 permanente** num deploy perfeitamente saudavel -- os uploads funcionam, o health nao.
+- **`s3:ListBucket` na role/usuario IAM da aplicacao, alem de `s3:PutObject`, `s3:GetObject` e `s3:DeleteObject`.** O check de storage do `GET /api/health` usa `HeadBucketCommand`, que exige `s3:ListBucket` sobre o bucket. Uma politica de menor privilegio so com as tres permissoes de objeto faz a readiness responder **503 permanente** num deploy perfeitamente saudavel -- os uploads funcionam, o health nao.
+- **Sonda de proxy, load balancer e healthcheck de container em `GET /api/health/live`, nunca em `GET /api/health`.** Sao dois endpoints com papeis diferentes: `/api/health/live` (liveness) responde 200 enquanto o processo aceita conexoes e **nao** consulta dependencia externa; `/api/health` (readiness) agrega banco + storage e responde 503 quando alguma falha. Apontar o roteamento para a readiness faz uma dependencia opcional derrubar a aplicacao inteira: o proxy tira o unico upstream do pool e passa a responder **502 em todas as rotas**, inclusive as que nao tocam storage.
 - **Nao deixe `AWS_S3_BUCKET` vazio se a aplicacao usa storage.** Sem a variavel o check de storage e ignorado (`configured: false`) e o health continua 200: e proposital para deploys que nao usam S3, mas nao protege quem esqueceu de configurar.
 
 ---
@@ -372,6 +373,8 @@ O template traz uma stack de producao pronta e um workflow de deploy. O passo a 
 
 O `docker-compose.yml` da raiz continua sendo **so de desenvolvimento** (portas expostas, senhas fixas, LocalStack). Os dois arquivos nao se misturam.
 
+> **A instancia nao e descartavel.** O banco de producao vive no volume Docker `infra_pgdata` da propria EC2 (e os certificados em `infra_caddy_data`): recriar a maquina ou rodar `down -v` apaga os dois. Nao ha backup automatico -- veja [`infra/README.md`](../infra/README.md#a-instancia-nao-e-descartavel-estado-em-volume-docker).
+
 ### Variaveis por GitHub Environment
 
 Crie um Environment por ambiente (`staging`, `production`) e defina nele estas tres **variables** — nenhum secret e necessario, porque a autenticacao na AWS e por OIDC:
@@ -386,4 +389,4 @@ A imagem e publicada com a tag **`${{ github.sha }}` e so ela** (sem `:latest`, 
 
 ### Antes do primeiro deploy
 
-O deploy roda `migration:run` na instancia (via `docker compose exec -T api`), mas o template **nao versiona migrations** — veja [5. Criar o Schema do Banco](#5-criar-o-schema-do-banco). Gere e commite a migration inicial antes do primeiro deploy: sem ela o `migration:run` e um no-op e a aplicacao sobe com o banco vazio.
+O deploy roda `migration:run` na instancia (num container efemero da imagem nova, via `docker compose run --rm --no-deps api`, **antes** de trocar o trafego), mas o template **nao versiona migrations** — veja [5. Criar o Schema do Banco](#5-criar-o-schema-do-banco). Gere e commite a migration inicial antes do primeiro deploy: sem ela o `migration:run` e um no-op e a aplicacao sobe com o banco vazio.
