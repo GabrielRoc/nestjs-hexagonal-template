@@ -89,15 +89,15 @@ src/
 
 ## Available Scripts
 
-| Script                       | Description                      |
-| ---------------------------- | -------------------------------- |
-| `npm run start:dev`          | Start the app in watch mode      |
-| `npm run build`              | Compile the project              |
-| `npm run lint`               | Run ESLint with auto-fix         |
-| `npm test`                   | Run unit tests                   |
-| `npm run test:e2e`           | Run end-to-end tests             |
-| `npm run migration:generate` | Generate a new TypeORM migration |
-| `npm run migration:run`      | Run pending migrations           |
+| Script                                                                | Description                                             |
+| --------------------------------------------------------------------- | ------------------------------------------------------- |
+| `npm run start:dev`                                                   | Start the app in watch mode                             |
+| `npm run build`                                                       | Compile the project                                     |
+| `npm run lint`                                                        | Run ESLint with auto-fix                                |
+| `npm test`                                                            | Run unit tests                                          |
+| `npm run test:e2e`                                                    | Run end-to-end tests                                    |
+| `npm run migration:generate -- src/database/migrations/MigrationName` | Generate a new TypeORM migration (the path is required) |
+| `npm run migration:run`                                               | Run pending migrations                                  |
 
 ---
 

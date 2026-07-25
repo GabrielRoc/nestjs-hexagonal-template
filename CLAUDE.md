@@ -163,15 +163,15 @@ export class SampleOrmEntity {
 
 ## Comandos
 
-| Comando                      | Descricao                    |
-| ---------------------------- | ---------------------------- |
-| `npm run start:dev`          | Inicia em modo watch         |
-| `npm run build`              | Compila o projeto            |
-| `npm run lint`               | Executa ESLint com auto-fix  |
-| `npm test`                   | Executa testes unitarios     |
-| `npm run test:e2e`           | Executa testes end-to-end    |
-| `npm run migration:generate` | Gera nova migration TypeORM  |
-| `npm run migration:run`      | Executa migrations pendentes |
+| Comando                                                                 | Descricao                                          |
+| ----------------------------------------------------------------------- | -------------------------------------------------- |
+| `npm run start:dev`                                                     | Inicia em modo watch                               |
+| `npm run build`                                                         | Compila o projeto                                  |
+| `npm run lint`                                                          | Executa ESLint com auto-fix                        |
+| `npm test`                                                              | Executa testes unitarios                           |
+| `npm run test:e2e`                                                      | Executa testes end-to-end                          |
+| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gera nova migration TypeORM (o path e obrigatorio) |
+| `npm run migration:run`                                                 | Executa migrations pendentes                       |
 
 ---
 
@@ -186,7 +186,7 @@ export class SampleOrmEntity {
 7. Implementar repositorio em `infrastructure/persistence/`
 8. Criar controller em `infrastructure/http/`
 9. Registrar providers no modulo (bind Symbol token ao repositorio concreto)
-10. Gerar migration (`npm run migration:generate`)
+10. Gerar migration (`npm run migration:generate -- src/database/migrations/NomeDaMigration`)
 11. Adicionar testes unitarios para o use case
 12. Adicionar testes e2e para o controller
 13. Documentar endpoints no Swagger (decorators `@ApiOperation`, `@ApiResponse`)
