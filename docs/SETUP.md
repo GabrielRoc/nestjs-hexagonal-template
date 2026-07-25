@@ -137,18 +137,61 @@ Aguarde ate que todos os servicos estejam com status `healthy` ou `running`.
 
 ## 5. Criar o Schema do Banco
 
-O template **nao versiona migrations**: as 5 entidades ORM (samples, users, tenants, audit_logs, tenant_features) nao tem DDL commitado e `synchronize` e `false` de proposito. Com o PostgreSQL rodando, gere a migration inicial e execute-a:
+O template ja versiona a migration inicial
+(`src/database/migrations/*-InitialSchema.ts`), que cria `app_tenants`, `users`,
+`audit_logs`, `samples` e `tenant_features`. `synchronize` e `false` de proposito, entao rode:
 
 ```bash
-npm run migration:generate -- src/database/migrations/InitialSchema
 npm run migration:run
 ```
 
-Os dois comandos compilam o projeto antes de chamar o CLI do TypeORM. `migration:run` executa todas as migrations pendentes.
+O comando compila o projeto antes de chamar o CLI do TypeORM e executa todas as
+migrations pendentes.
 
 Sem esse passo a aplicacao sobe normalmente, mas a primeira query falha com `relation "..." does not exist` -- e nas rotas autenticadas o erro chega ao cliente como um 403 opaco, nao como erro de banco.
 
-Confira na migration gerada o indice unico **parcial** de `tenant_features` (`... ("tenantId", "featureKey") WHERE "deletedAt" IS NULL`). O predicado vem do `@Index` da entidade e e o que permite recriar uma flag apagada logicamente; um unique comum quebraria o `ON CONFLICT` do upsert de features.
+### Banco de testes
+
+`npm run test:e2e` roda contra um banco separado, `template_db_test`, e faz
+`dropSchema` nele a cada execucao (por isso o harness recusa qualquer nome que
+nao termine em `_test`). O `docker-compose.yml` cria esse banco no primeiro boot
+do volume do Postgres. Se o seu volume ja existia antes desta versao do template:
+
+```bash
+docker compose exec postgres createdb -U postgres template_db_test
+```
+
+O e2e cria o schema pela propria migration, entao nao e preciso rodar
+`migration:run` nesse banco.
+
+### Gerando novas migrations
+
+`migration:generate` **exige um Postgres de pe**: ele compara a metadata das
+entidades com o schema real e nao tem como diferenciar sem conectar (sem banco, o
+comando falha com `ECONNREFUSED`).
+
+```bash
+npm run migration:generate -- src/database/migrations/NomeDaMigration
+```
+
+Depois de gerar, confira dois pontos que o TypeORM erra ou nao sabe:
+
+- Troque `uuid_generate_v4()` por `gen_random_uuid()`. O primeiro depende da
+  extensao `uuid-ossp`; o TypeORM tenta instala-la na conexao mas engole o erro
+  quando o papel do banco nao e dono dele, e a migration quebra com
+  `function uuid_generate_v4() does not exist`.
+- Unicidade em tabela com soft delete tem de ser indice parcial
+  (`WHERE "deletedAt" IS NULL`) — declare na entidade com
+  `@Index([...], { unique: true, where: '"deletedAt" IS NULL' })` e o TypeORM
+  gera certo. Ver `docs/CONVENTIONS.md`.
+
+Nao renomeie os indices/constraints gerados: o proximo `migration:generate`
+passaria a acusar diferenca e emitir DROP/CREATE sem motivo.
+
+O caso concreto no template e `tenant_features`: o indice unico e parcial em
+`("tenantId", "featureKey") WHERE "deletedAt" IS NULL`. O predicado vem do
+`@Index` da entidade e e o que permite recriar uma flag apagada logicamente —
+um unique comum quebraria o `ON CONFLICT` do upsert de features.
 
 ---
 
