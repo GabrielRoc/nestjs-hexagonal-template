@@ -55,13 +55,22 @@ export class UpdateUserUseCase {
   /**
    * Rebaixar o unico admin ativo deixaria o tenant sem ninguem capaz de
    * administrar usuarios — o mesmo bloqueio existe na desativacao e na exclusao.
+   *
+   * A regra vale apenas para um admin ATIVO: countActiveAdminsByTenantId nao
+   * conta admins inativos, entao rebaixar um admin inativo nao muda a contagem
+   * e nao pode trancar o tenant (mesmo criterio de ToggleUserActiveUseCase).
    */
   private async assertNotLastAdmin(
     user: User,
     tenantId: string,
     newRole?: Role,
   ): Promise<void> {
-    if (!newRole || user.role !== Role.ADMIN || newRole === Role.ADMIN) {
+    if (
+      !newRole ||
+      !user.isActive ||
+      user.role !== Role.ADMIN ||
+      newRole === Role.ADMIN
+    ) {
       return;
     }
 

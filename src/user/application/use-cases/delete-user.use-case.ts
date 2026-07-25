@@ -40,7 +40,10 @@ export class DeleteUserUseCase {
       );
     }
 
-    if (user.role === Role.ADMIN) {
+    // Só um admin ATIVO conta para a regra: countActiveAdminsByTenantId ignora
+    // admins inativos, entao excluir um deles nao reduz a contagem nem deixa o
+    // tenant sem administrador (mesmo criterio de ToggleUserActiveUseCase).
+    if (user.isActive && user.role === Role.ADMIN) {
       const activeAdmins =
         await this.userRepo.countActiveAdminsByTenantId(tenantId);
       if (activeAdmins <= 1) {
