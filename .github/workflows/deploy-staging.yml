@@ -1,0 +1,38 @@
+name: Deploy staging
+
+# Caller: so o gatilho e o ambiente. A logica esta em deploy.yml.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'nest-cli.json'
+      - 'Dockerfile'
+      - 'infra/**'
+      - '.github/workflows/deploy*.yml'
+  workflow_dispatch:
+
+# Precisa repetir o bloco do workflow chamado: as permissoes do caller sao o
+# teto do que o reusavel recebe.
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  # Um deploy por vez neste ambiente. `cancel-in-progress: false` de proposito:
+  # cancelar no meio de um `docker compose up`/`migration:run` deixa a stack em
+  # estado desconhecido.
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+    # `vars` do Environment resolvem pelo `environment:` do job reusavel; o
+    # inherit cobre os secrets, caso o deploy passe a precisar de algum.
+    secrets: inherit

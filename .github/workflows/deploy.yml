@@ -1,0 +1,231 @@
+name: Deploy (reusavel)
+
+# Workflow REUSAVEL: nao roda sozinho. Os gatilhos ficam nos callers
+# (deploy-staging.yml e deploy-production.yml), que passam apenas o nome do
+# GitHub Environment. Toda a logica de build e deploy vive aqui, uma unica vez:
+# duplicar este arquivo por ambiente e como as duas copias divergem em silencio
+# (uma ganha um fix, a outra nao).
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: >-
+          Nome do GitHub Environment. Define de onde vem vars/secrets e aplica
+          as protection rules configuradas (ex.: required reviewers em prod).
+        required: true
+        type: string
+      aws-region:
+        description: Regiao AWS do ECR e da instancia EC2.
+        required: false
+        default: us-east-1
+        type: string
+      remote-dir:
+        description: >-
+          Diretorio na EC2 que contem o `.env` do servidor e o subdiretorio
+          `infra/`. Precisa existir antes do primeiro deploy (veja
+          infra/README.md).
+        required: false
+        default: /opt/app
+        type: string
+      wait-timeout-seconds:
+        description: >-
+          Tempo maximo de espera pelo comando SSM (build da stack + migrations).
+          Precisa ser maior que o `--wait-timeout` do compose.
+        required: false
+        default: 900
+        type: number
+
+# Minimo necessario: `id-token` para trocar o token OIDC do GitHub por
+# credenciais temporarias da AWS, `contents` para o checkout. Um workflow
+# chamado NUNCA recebe mais permissao que o caller, por isso os callers
+# declaram o mesmo bloco -- sem ele o step de OIDC falha com 400.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Build e deploy
+    runs-on: ubuntu-latest
+    # Faz `vars.*` e `secrets.*` resolverem para os valores DESTE ambiente e
+    # aplica as protection rules dele.
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciais AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Nenhuma chave estatica no repositorio: a role e assumida via OIDC e
+          # as credenciais expiram com o job. A trust policy da role precisa
+          # aceitar token.actions.githubusercontent.com (veja infra/README.md).
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Login no Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Configurar Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build e push da imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Tag imutavel (SHA do commit) e SO ela. Com uma tag movel (:latest) um
+          # restart do container passa a subir outra build sem ninguem pedir, e
+          # rollback deixa de ser deterministico -- so o SHA identifica o que
+          # esta rodando.
+          tags: ${{ vars.ECR_REPOSITORY_URL }}:${{ github.sha }}
+          # A EC2 e x86_64; sem isso o buildx segue a arquitetura do runner (que
+          # hoje coincide, mas deixa de coincidir em runner ARM).
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # O manifesto de attestation transforma a tag em manifest list e
+          # aparece como `unknown/unknown` na listagem do ECR, sem nada aqui
+          # consumindo a proveniencia.
+          provenance: false
+
+      - name: Enviar comando de deploy via SSM
+        id: ssm
+        env:
+          # Valores externos entram por env, nunca interpolados direto no corpo
+          # do script: `${{ }}` e substituido ANTES do shell existir, entao um
+          # valor com caractere especial viraria codigo executavel no runner.
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+          IMAGE_TAG: ${{ github.sha }}
+          REMOTE_DIR: ${{ inputs.remote-dir }}
+          TARGET_REGION: ${{ inputs.aws-region }}
+        run: |
+          set -euo pipefail
+
+          : "${EC2_INSTANCE_ID:?vars.EC2_INSTANCE_ID nao definido no Environment}"
+          : "${ECR_REPOSITORY_URL:?vars.ECR_REPOSITORY_URL nao definido no Environment}"
+
+          IMAGE="${ECR_REPOSITORY_URL}:${IMAGE_TAG}"
+          # Host do registry (tudo antes da primeira barra) para o docker login.
+          REGISTRY="${ECR_REPOSITORY_URL%%/*}"
+
+          COMPOSE_B64="$(base64 -w0 infra/docker-compose.yml)"
+          CADDY_B64="$(base64 -w0 infra/Caddyfile.example)"
+
+          # O JSON dos parametros e montado com jq e passado por arquivo. Montar
+          # `--parameters "commands=[\"...\"]"` a mao (como fazia o projeto de
+          # origem) quebra assim que o conteudo tem aspas, `$` ou barra
+          # invertida; `@sh` ainda cuida do quoting no shell da instancia.
+          jq -n \
+            --arg dir "$REMOTE_DIR" \
+            --arg image "$IMAGE" \
+            --arg registry "$REGISTRY" \
+            --arg region "$TARGET_REGION" \
+            --arg compose "$COMPOSE_B64" \
+            --arg caddy "$CADDY_B64" \
+            '{
+              executionTimeout: ["840"],
+              commands: [
+                "set -eu",
+                "DIR=\($dir|@sh)",
+                "IMAGE=\($image|@sh)",
+                "REGISTRY=\($registry|@sh)",
+                "REGION=\($region|@sh)",
+                "COMPOSE_B64=\($compose|@sh)",
+                "CADDY_B64=\($caddy|@sh)",
+                "test -d \"$DIR\" || { echo \"ERRO: $DIR nao existe na instancia (veja infra/README.md)\"; exit 1; }",
+                "test -f \"$DIR/.env\" || { echo \"ERRO: $DIR/.env nao existe -- crie a partir de infra/.env.example\"; exit 1; }",
+                "mkdir -p \"$DIR/infra\"",
+                "printf %s \"$COMPOSE_B64\" | base64 -d > \"$DIR/infra/docker-compose.yml\"",
+                "printf %s \"$CADDY_B64\" | base64 -d > \"$DIR/infra/Caddyfile\"",
+                "cd \"$DIR\"",
+                "sed -i \"/^API_IMAGE=/d\" .env",
+                "printf \"API_IMAGE=%s\\n\" \"$IMAGE\" >> .env",
+                "COMPOSE=\"docker compose --env-file .env -f infra/docker-compose.yml\"",
+                "aws ecr get-login-password --region \"$REGION\" | docker login --username AWS --password-stdin \"$REGISTRY\"",
+                "$COMPOSE pull api",
+                "$COMPOSE up -d --wait --wait-timeout 480 --remove-orphans",
+                "$COMPOSE exec -T api node_modules/.bin/typeorm migration:run -d dist/database/typeorm-cli.config.js",
+                "docker image prune -f",
+                "$COMPOSE ps"
+              ]
+            }' > "$RUNNER_TEMP/ssm-params.json"
+
+          COMMAND_ID="$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${IMAGE_TAG:0:12}" \
+            --parameters "file://$RUNNER_TEMP/ssm-params.json" \
+            --query Command.CommandId \
+            --output text)"
+
+          echo "Comando SSM: $COMMAND_ID"
+          echo "command-id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+      # ESTE step e o que impede o workflow de ficar verde num deploy que
+      # falhou. `send-command` retorna assim que a AWS aceita o comando: sem
+      # consultar o status da invocacao, qualquer erro na instancia (pull
+      # negado, container unhealthy, migration quebrada) passa batido. O projeto
+      # de origem usava `sleep 5` no lugar disto.
+      - name: Aguardar o resultado do comando SSM
+        env:
+          COMMAND_ID: ${{ steps.ssm.outputs.command-id }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          TIMEOUT_SECONDS: ${{ inputs.wait-timeout-seconds }}
+        run: |
+          set -euo pipefail
+
+          # StandardOutputContent/StandardErrorContent vem truncado em 2500
+          # caracteres. Para o log completo configure output em S3/CloudWatch no
+          # send-command; aqui o objetivo e so ter o erro na tela do job.
+          dump_output() {
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query '[StandardOutputContent, StandardErrorContent]' \
+              --output text || true
+          }
+
+          deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
+
+          while :; do
+            # Nos primeiros segundos a invocacao ainda nao existe e a chamada
+            # falha com InvocationDoesNotExist: isso e "ainda nao comecou", nao
+            # erro de deploy.
+            status="$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query Status \
+              --output text 2>/dev/null || echo Pending)"
+
+            echo "status=$status"
+
+            case "$status" in
+              Success)
+                dump_output
+                echo "Deploy concluido."
+                exit 0
+                ;;
+              Pending | InProgress | Delayed)
+                # Segue no loop.
+                ;;
+              *)
+                # Failed, TimedOut, Cancelled, Cancelling, AccessDenied e
+                # qualquer status novo entram aqui: desconhecido e tratado como
+                # falha de proposito.
+                echo "::error::Deploy falhou na instancia (status=$status)."
+                dump_output
+                exit 1
+                ;;
+            esac
+
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Timeout aguardando o comando SSM ($TIMEOUT_SECONDS s). O comando pode ainda estar rodando na instancia."
+              dump_output
+              exit 1
+            fi
+
+            sleep 10
+          done
