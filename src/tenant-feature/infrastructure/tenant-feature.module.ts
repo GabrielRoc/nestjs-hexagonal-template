@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeormEntity } from '../../tenant/infrastructure/persistence/tenant.typeorm-entity';
+import { TenantModule } from '../../tenant/infrastructure/tenant.module';
 import { TenantFeatureService } from '../application/services/tenant-feature.service';
 import { BulkUpdateTenantFeaturesUseCase } from '../application/use-cases/bulk-update-tenant-features.use-case';
 import { GetTenantFeaturesUseCase } from '../application/use-cases/get-tenant-features.use-case';
@@ -26,8 +27,13 @@ import { TenantFeatureTypeormRepository } from './persistence/tenant-feature.typ
   // TenantFeatureTypeormEntity#tenant was not found". Registrar aqui deixa o
   // modulo carregavel sozinho (util em teste) em vez de depender de o AppModule
   // tambem importar o TenantModule.
+  // TenantModule entra por causa do TENANT_REPOSITORY que ele exporta: os use
+  // cases checam se o tenant existe antes de ler/escrever flags. Reusar o port
+  // do modulo dono do tenant evita duplicar essa consulta aqui. Nao ha ciclo —
+  // TenantModule nao conhece feature flags.
   imports: [
     TypeOrmModule.forFeature([TenantFeatureTypeormEntity, TenantTypeormEntity]),
+    TenantModule,
   ],
   controllers: [TenantFeatureController],
   providers: [

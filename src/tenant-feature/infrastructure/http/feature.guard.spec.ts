@@ -6,6 +6,8 @@ import { ErrorCode } from '../../../common/enums/error-codes.enum';
 import { Role } from '../../../common/enums/role.enum';
 import { DomainException } from '../../../common/exceptions/domain.exception';
 import type { RequestUser } from '../../../common/interfaces';
+import { Tenant } from '../../../tenant/domain/entities/tenant.entity';
+import type { TenantRepositoryPort } from '../../../tenant/domain/ports/tenant.repository.port';
 import { TenantFeatureService } from '../../application/services/tenant-feature.service';
 import { BulkUpdateTenantFeaturesUseCase } from '../../application/use-cases/bulk-update-tenant-features.use-case';
 import { TenantFeature } from '../../domain/entities/tenant-feature.entity';
@@ -59,6 +61,21 @@ function feature(enabled: boolean): TenantFeature {
 const defaultConfig = {
   get: () => undefined,
 } as unknown as ConfigService;
+
+/** Tenant sempre existente: aqui o alvo e o cache, nao a checagem de tenant. */
+function existingTenantRepository(): TenantRepositoryPort {
+  return {
+    findById: jest.fn().mockResolvedValue(
+      new Tenant({
+        id: TENANT_ID,
+        name: 'Tenant',
+        document: '00000000000',
+        email: 'tenant@example.com',
+        phone: '11999999999',
+      }),
+    ),
+  } as unknown as TenantRepositoryPort;
+}
 
 describe('FeatureGuard', () => {
   let repo: jest.Mocked<
@@ -183,7 +200,11 @@ describe('FeatureGuard', () => {
         role: Role.USER,
         tenantId: TENANT_ID,
       });
-      const bulkUpdate = new BulkUpdateTenantFeaturesUseCase(repo, service);
+      const bulkUpdate = new BulkUpdateTenantFeaturesUseCase(
+        repo,
+        service,
+        existingTenantRepository(),
+      );
 
       await guard.canActivate(context);
       expect(repo.findByTenantId).toHaveBeenCalledTimes(1);
@@ -193,15 +214,20 @@ describe('FeatureGuard', () => {
         features: [{ featureKey: 'EXPORT', enabled: false }],
       });
 
-      // Sem a invalidacao, esta chamada seria servida do cache e liberaria uma
-      // feature ja desligada ate o TTL vencer.
+      // O use case tambem le o estado atual (para preservar numericValue
+      // omitido), entao o que interessa aqui e o delta: a checagem seguinte
+      // precisa somar UMA leitura, provando que nao veio do cache. Sem a
+      // invalidacao ela seria servida do cache e liberaria uma feature ja
+      // desligada ate o TTL vencer.
+      const callsBeforeRecheck = repo.findByTenantId.mock.calls.length;
+
       const promise = guard.canActivate(context);
       await expect(promise).rejects.toThrow(DomainException);
       await promise.catch((error: DomainException) => {
         expect(error.code).toBe(ErrorCode.FEATURE_DISABLED);
         expect(error.httpStatus).toBe(HttpStatus.FORBIDDEN);
       });
-      expect(repo.findByTenantId).toHaveBeenCalledTimes(2);
+      expect(repo.findByTenantId).toHaveBeenCalledTimes(callsBeforeRecheck + 1);
     });
 
     it('nao invalida o cache de outro tenant', async () => {
@@ -211,7 +237,11 @@ describe('FeatureGuard', () => {
         role: Role.USER,
         tenantId: otherTenantId,
       });
-      const bulkUpdate = new BulkUpdateTenantFeaturesUseCase(repo, service);
+      const bulkUpdate = new BulkUpdateTenantFeaturesUseCase(
+        repo,
+        service,
+        existingTenantRepository(),
+      );
 
       await guard.canActivate(otherContext);
       await bulkUpdate.execute(TENANT_ID, {
@@ -219,8 +249,13 @@ describe('FeatureGuard', () => {
       });
       await guard.canActivate(otherContext);
 
-      expect(repo.findByTenantId).toHaveBeenCalledTimes(1);
-      expect(repo.findByTenantId).toHaveBeenCalledWith(otherTenantId);
+      // Uma unica leitura do OUTRO tenant: a segunda checagem veio do cache,
+      // que a escrita em TENANT_ID nao derrubou. As leituras do use case sao de
+      // TENANT_ID, por isso o filtro por argumento.
+      expect(
+        repo.findByTenantId.mock.calls.filter(([id]) => id === otherTenantId)
+          .length,
+      ).toBe(1);
     });
   });
 });

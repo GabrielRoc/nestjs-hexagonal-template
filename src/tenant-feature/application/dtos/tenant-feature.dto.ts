@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 import {
   FEATURE_KEY_MAX_LENGTH,
+  FEATURE_NUMERIC_VALUE_MAX,
   FeatureKey,
 } from '../../domain/enums/feature-key.enum';
 
@@ -30,10 +31,24 @@ export const featureKeySchema: z.ZodType<string> =
  */
 export const tenantIdParamSchema = z.uuid();
 
+/**
+ * `numericValue` tem tres estados, e os tres significam coisas diferentes:
+ *
+ * - AUSENTE: nao mexe no valor guardado (o use case le o atual e o mantem).
+ * - `null`: limpa o limite explicitamente.
+ * - inteiro de 0 a FEATURE_NUMERIC_VALUE_MAX: define o limite. 0 e valido
+ *   (cota zero); o teto vem do tipo da coluna, ver o comentario da constante.
+ */
 export const updateTenantFeatureSchema = z.object({
   featureKey: featureKeySchema,
   enabled: z.boolean(),
-  numericValue: z.number().int().positive().nullable().optional(),
+  numericValue: z
+    .number()
+    .int()
+    .min(0)
+    .max(FEATURE_NUMERIC_VALUE_MAX)
+    .nullable()
+    .optional(),
 });
 
 export const bulkUpdateTenantFeaturesSchema = z.object({
@@ -91,7 +106,16 @@ export class UpdateTenantFeatureSwagger {
   @ApiProperty({ example: true })
   enabled!: boolean;
 
-  @ApiProperty({ example: 100, nullable: true, required: false, type: Number })
+  @ApiProperty({
+    example: 100,
+    nullable: true,
+    required: false,
+    type: Number,
+    minimum: 0,
+    maximum: FEATURE_NUMERIC_VALUE_MAX,
+    description:
+      'Limite numerico da flag. Omita para manter o valor atual, envie null para limpar. 0 e um limite valido (cota zero).',
+  })
   numericValue?: number | null;
 }
 

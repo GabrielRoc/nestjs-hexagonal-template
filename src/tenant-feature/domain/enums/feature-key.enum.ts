@@ -39,7 +39,22 @@ export type FeatureKeyValue = string;
 
 /**
  * Largura da coluna `featureKey` em `tenant_features`. Mantenha em sincronia
- * com a entidade TypeORM e a migration: o schema Zod usa este valor para
- * recusar chaves longas antes de o banco truncar/estourar.
+ * com a entidade TypeORM: o schema Zod usa este valor para recusar chaves
+ * longas antes de o banco truncar/estourar.
  */
 export const FEATURE_KEY_MAX_LENGTH = 50;
+
+/**
+ * Teto de `numericValue` em `tenant_features`. A coluna e `integer` (int32), e
+ * `z.number().int()` sozinho aceita qualquer inteiro seguro do JS (±2^53) — sem
+ * este limite, um valor acima de 2^31-1 passa pela validacao e o Postgres
+ * responde `22003 integer out of range`, que o GlobalExceptionFilter entrega
+ * como 500 em vez de 400. Mesmo cuidado de FEATURE_KEY_MAX_LENGTH: par
+ * schema/coluna explicito.
+ *
+ * O piso e 0, nao 1: cota zero e um estado legitimo ("o plano nao permite
+ * nenhum item") e diferente de nao ter limite. `enabled: false` nao serve de
+ * substituto — nesse caso `getNumericLimit()` devolveria null (sem limite), o
+ * oposto do pretendido.
+ */
+export const FEATURE_NUMERIC_VALUE_MAX = 2_147_483_647;

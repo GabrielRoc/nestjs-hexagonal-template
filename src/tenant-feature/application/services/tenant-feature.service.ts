@@ -1,6 +1,4 @@
-import { HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { ErrorCode } from '../../../common/enums/error-codes.enum';
-import { DomainException } from '../../../common/exceptions/domain.exception';
+import { Inject, Injectable } from '@nestjs/common';
 import type { TenantFeature } from '../../domain/entities/tenant-feature.entity';
 import type { FeatureKeyValue } from '../../domain/enums/feature-key.enum';
 import { FeatureKey } from '../../domain/enums/feature-key.enum';
@@ -13,6 +11,7 @@ import {
   type TenantFeatureRepositoryPort,
 } from '../../domain/ports/tenant-feature.repository.port';
 import type { TenantFeatureResponseDto } from '../dtos/tenant-feature.dto';
+import { assertTenantContext } from '../tenant.assertions';
 
 /**
  * Leitura das feature flags de um tenant, com cache.
@@ -87,17 +86,10 @@ export class TenantFeatureService {
 
   private async loadFeatures(tenantId: string): Promise<TenantFeature[]> {
     // tenantId vazio nao e um filtro: a query iria ao banco com '' e o Postgres
-    // devolveria erro de cast de uuid (500). Acontece de verdade em
-    // GET /v1/tenant-features/me chamada por um SUPERADMIN, que o
-    // tenant-context.middleware cria com tenantId: '' e o RolesGuard libera.
-    // 403 com codigo e a resposta correta; 500 seria ruido.
-    if (!tenantId) {
-      throw new DomainException(
-        ErrorCode.TENANT_CONTEXT_MISSING,
-        'Contexto de tenant não encontrado',
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    // devolveria erro de cast de uuid (500). 403 com codigo e a resposta
+    // correta; 500 seria ruido. Vale para o caminho do FeatureGuard, que chama
+    // o servico direto, sem passar por use case.
+    assertTenantContext(tenantId);
 
     const cached = this.cache.get(tenantId);
     if (cached !== null) {
