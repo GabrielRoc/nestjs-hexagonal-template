@@ -164,6 +164,21 @@ docker compose exec postgres createdb -U postgres template_db_test
 O e2e cria o schema pela propria migration, entao nao e preciso rodar
 `migration:run` nesse banco.
 
+O e2e tambem exige o **Redis de pe** (`REDIS_HOST`/`REDIS_PORT`) — o
+`docker compose up -d` ja sobe o servico, e o job `test-e2e` do CI tem o servico
+`redis` ao lado do `postgres`. A rota que enfileira trabalho e coberta ponta a
+ponta: o Worker do BullMQ roda dentro do processo de teste e o assert final e no
+banco, depois que o job foi processado.
+
+Sem Redis, os testes de CRUD continuam passando e apenas os da fila falham — mas
+devagar (cada um espera o timeout de 3s do adapter ou o prazo do polling). Se o
+arquivo inteiro falhar em menos de 1s com `Worker requires a connection`, o
+problema nao e o Redis: e um modulo de teste que importou um modulo com
+`@Processor` sem importar o `QueueModule`, que e quem registra a conexao.
+
+O e2e nao apaga a fila em massa (nada de `queue.obliterate()`), entao rodar contra
+o Redis do seu ambiente nao leva os seus jobs junto.
+
 ### Gerando novas migrations
 
 `migration:generate` **exige um Postgres de pe**: ele compara a metadata das
@@ -289,7 +304,7 @@ Apos criar o usuario no SuperTokens, voce precisa registra-lo na aplicacao:
 | `npm test`                                                              | Executar testes unitarios                                    |
 | `npm run test:watch`                                                    | Testes em modo watch                                         |
 | `npm run test:cov`                                                      | Testes com relatorio de cobertura                            |
-| `npm run test:e2e`                                                      | Testes end-to-end                                            |
+| `npm run test:e2e`                                                      | Testes end-to-end (exigem Postgres e Redis de pe)            |
 | `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gerar migration                                              |
 | `npm run migration:create -- src/database/migrations/NomeDaMigration`   | Criar migration vazia                                        |
 | `npm run migration:run`                                                 | Executar migrations pendentes                                |

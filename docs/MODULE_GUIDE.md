@@ -1263,4 +1263,6 @@ it('propaga falha de persistencia para o BullMQ reagendar', async () => {
 - [ ] Testes unitarios escritos para use cases, domain services e processors
       (padrao em `CLAUDE.md`, secao "Convencoes de teste")
 - [ ] Rotas cobertas no e2e (`test/*.e2e-spec.ts`), incluindo isolamento entre
-      tenants e o papel exigido em cada rota
+      tenants e o papel exigido em cada rota — rota que enfileira tambem precisa
+      do `@Roles`, e o modulo de teste precisa importar o `QueueModule` junto com
+      o modulo de dominio (ver "Convencoes de teste" no `CLAUDE.md`)

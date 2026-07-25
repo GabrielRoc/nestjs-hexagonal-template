@@ -356,10 +356,31 @@ paginacao). Referencias: `src/sample/application/use-cases/*.spec.ts`,
 
 **Testes e2e** (`test/*.e2e-spec.ts`) rodam contra um Postgres real com o schema
 criado pela migration (`dropSchema` + `migrationsRun`) — se a migration quebrar,
-o e2e nao sobe. O banco tem de terminar em `_test` (o harness recusa outro nome);
-o `docker-compose.yml` cria `template_db_test` no primeiro boot do volume. O que
-o e2e cobre e o que ele **nao** cobre esta no cabecalho de
-`test/sample.e2e-spec.ts` — leia antes de confiar na cobertura.
+o e2e nao sobe — **e contra um Redis real**. O banco tem de terminar em `_test`
+(o harness recusa outro nome); o `docker-compose.yml` cria `template_db_test` no
+primeiro boot do volume e ja sobe o Redis. O que o e2e cobre e o que ele **nao**
+cobre esta no cabecalho de `test/sample.e2e-spec.ts` — leia antes de confiar na
+cobertura.
+
+Duas regras que valem para qualquer e2e novo deste template:
+
+- **Modulo de teste e recorte do `AppModule`, e recorte leva as dependencias
+  globais.** Um modulo de dominio que declara fila (`registerQueue` +
+  `@Processor`) so sobe junto com o `QueueModule`, que e quem faz o
+  `BullModule.forRootAsync`: sem ele o `app.init()` estoura
+  `Worker requires a connection` no `onModuleInit` do `@nestjs/bullmq` e **todos**
+  os testes do arquivo falham, com Redis de pe ou nao. Importar o modulo real e o
+  ponto: e o que faz um erro de wiring aparecer no teste em vez de em producao.
+  Diagnostico: arquivo de e2e que falha **inteiro em menos de 1s** e dependencia
+  de modulo faltando; Redis fora do ar derruba so os testes de fila, e devagar.
+- **Fila com Redis real, nao dobro em memoria.** Substituir o port de fila por um
+  stub no e2e faz o teste parar na borda do port — nada prova que
+  `registerQueue`, `@InjectQueue` e `@Processor` apontam para a mesma fila nem que
+  o job chega ao worker. Assercao de efeito assincrono e por **polling com
+  prazo** (helper `waitUntil` em `test/sample.e2e-spec.ts`), nunca `setTimeout`
+  fixo. O e2e tambem **nao** limpa a fila em massa: `queue.obliterate()` apagaria
+  a fila do ambiente de quem rodou o teste (o Redis nao tem o equivalente do
+  sufixo `_test`), entao cada assercao filtra os jobs pelo id que ela mesma criou.
 
 **Duas decisoes de configuracao, para nao serem revertidas por engano:**
 
@@ -465,19 +486,19 @@ o `TurnstileGuard` das rotas de auth so exige captcha quando
 
 ## Comandos
 
-| Comando                                                                 | Descricao                                                          |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `npm run start:dev`                                                     | Inicia em modo watch                                               |
-| `npm run build`                                                         | Compila o projeto                                                  |
-| `npm run lint`                                                          | Executa ESLint com auto-fix                                        |
-| `npm run lint:check`                                                    | ESLint sem auto-fix, `--max-warnings 0` (gate do CI)               |
-| `npm run format:check`                                                  | Prettier em modo check, inclui `docs/**/*.md` e `.github/**/*.yml` |
-| `npm run typecheck`                                                     | `tsc --noEmit` sobre o projeto inteiro, incluindo `test/`          |
-| `npm test`                                                              | Executa testes unitarios (sem `--passWithNoTests`, de proposito)   |
-| `npm run test:cov`                                                      | Cobertura (informativa; nao ha `coverageThreshold`)                |
-| `npm run test:e2e`                                                      | E2E contra Postgres; exige `DB_DATABASE` terminando em `_test`     |
-| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gera nova migration TypeORM (o path e obrigatorio)                 |
-| `npm run migration:run`                                                 | Executa migrations pendentes                                       |
+| Comando                                                                 | Descricao                                                              |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `npm run start:dev`                                                     | Inicia em modo watch                                                   |
+| `npm run build`                                                         | Compila o projeto                                                      |
+| `npm run lint`                                                          | Executa ESLint com auto-fix                                            |
+| `npm run lint:check`                                                    | ESLint sem auto-fix, `--max-warnings 0` (gate do CI)                   |
+| `npm run format:check`                                                  | Prettier em modo check, inclui `docs/**/*.md` e `.github/**/*.yml`     |
+| `npm run typecheck`                                                     | `tsc --noEmit` sobre o projeto inteiro, incluindo `test/`              |
+| `npm test`                                                              | Executa testes unitarios (sem `--passWithNoTests`, de proposito)       |
+| `npm run test:cov`                                                      | Cobertura (informativa; nao ha `coverageThreshold`)                    |
+| `npm run test:e2e`                                                      | E2E contra Postgres + Redis; exige `DB_DATABASE` terminando em `_test` |
+| `npm run migration:generate -- src/database/migrations/NomeDaMigration` | Gera nova migration TypeORM (o path e obrigatorio)                     |
+| `npm run migration:run`                                                 | Executa migrations pendentes                                           |
 
 ---
 

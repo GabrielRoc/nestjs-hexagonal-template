@@ -100,6 +100,20 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # Obrigatorio, nao opcional: o e2e cobre a rota de enfileiramento ponta a
+      # ponta (produtor -> Redis -> Worker do BullMQ -> banco), com o
+      # `SampleModule` e o `QueueModule` reais. Sem este servico os cinco testes
+      # da fila falham — e falham devagar, esperando timeout de conexao.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -122,3 +136,5 @@ jobs:
           DB_USERNAME: postgres
           DB_PASSWORD: postgres
           DB_DATABASE: template_db_test
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379

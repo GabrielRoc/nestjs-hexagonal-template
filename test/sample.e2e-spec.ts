@@ -1,9 +1,12 @@
 import type { Server } from 'node:http';
+import { getQueueToken } from '@nestjs/bullmq';
 import { INestApplication, Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import type { Queue } from 'bullmq';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 
@@ -18,6 +21,8 @@ import type {
   RequestWithUser,
 } from '../src/common/interfaces/request-with-user.interface';
 
+import { redisConfig } from '../src/config';
+import { QueueModule } from '../src/queue/queue.module';
 import { InitialSchema1784953438174 } from '../src/database/migrations/1784953438174-InitialSchema';
 import { AuditLogTypeormEntity } from '../src/audit-log/infrastructure/persistence/audit-log.typeorm-entity';
 import { TenantTypeormEntity } from '../src/tenant/infrastructure/persistence/tenant.typeorm-entity';
@@ -26,6 +31,11 @@ import { UserTypeormEntity } from '../src/user/infrastructure/persistence/user.t
 import { SampleTypeormEntity } from '../src/sample/infrastructure/persistence/sample.typeorm-entity';
 import { SampleModule } from '../src/sample/infrastructure/sample.module';
 import type { SampleResponseDto } from '../src/sample/application/dtos/sample.dto';
+import type { DeactivateSampleJobData } from '../src/sample/domain/ports/sample-queue.port';
+import {
+  SAMPLE_DEACTIVATE_JOB,
+  SAMPLE_QUEUE_NAME,
+} from '../src/sample/infrastructure/queue/sample-queue.constants';
 
 /**
  * ==========================================================================
@@ -33,7 +43,8 @@ import type { SampleResponseDto } from '../src/sample/application/dtos/sample.dt
  * ==========================================================================
  *
  * Cobre, de ponta a ponta, contra um **Postgres real** com o schema criado pela
- * migration deste repositorio (`dropSchema` + `migrationsRun`):
+ * migration deste repositorio (`dropSchema` + `migrationsRun`) e um **Redis
+ * real** para a fila:
  *
  * - HTTP -> controller -> ZodValidationPipe -> use case -> repositorio TypeORM
  *   -> banco -> envelope de resposta -> GlobalExceptionFilter.
@@ -43,6 +54,10 @@ import type { SampleResponseDto } from '../src/sample/application/dtos/sample.dt
  * - Isolamento entre tenants, com dois tenants gravados de verdade.
  * - Semantica de soft delete (a linha continua no banco, com `deletedAt`).
  * - Contas de paginacao sobre dados reais.
+ * - A **volta completa da fila**: request -> use case -> `SampleQueueAdapter` ->
+ *   Redis -> `SampleProcessor` (Worker do BullMQ rodando neste processo) ->
+ *   repositorio -> banco. Com um dobro no lugar do `SAMPLE_QUEUE` o teste
+ *   pararia na borda do port e nada provaria que o job chega ao worker.
  * - A propria migration: se ela quebrar, este arquivo nao sobe. Inclusive os
  *   indices unique parciais, que so um banco real pode provar, e a sincronia
  *   entre a migration e a metadata das entidades.
@@ -65,12 +80,18 @@ import type { SampleResponseDto } from '../src/sample/application/dtos/sample.dt
  *   middleware — e hoje o template nao tem teste nenhum sobre ela.
  * - **ThrottlerGuard, AuditLogInterceptor, Helmet, CORS, Swagger.** Ficam fora
  *   do modulo de teste; sao montados no `AppModule`/`main.ts`.
+ * - **Retry, backoff e o 503 de fila indisponivel.** O teste prova que o job
+ *   entra com `attempts`/`backoff` configurados, nao que o BullMQ reexecuta
+ *   depois de 30s — esperar isso num teste seria absurdo. O caminho "Redis fora
+ *   do ar => `QUEUE_UNAVAILABLE`" e unitario, com o `add()` mockado
+ *   (`sample-queue.adapter.spec.ts`), porque exige derrubar o Redis no meio da
+ *   execucao.
  *
  * Para cobrir autenticacao de verdade seria preciso adicionar o servico
  * `supertokens` ao job `test-e2e` do CI.
  *
  * ==========================================================================
- * BANCO
+ * BANCO E REDIS
  * ==========================================================================
  *
  * O nome do banco tem de terminar em `_test`: o setup faz `dropSchema` e apagar
@@ -79,6 +100,27 @@ import type { SampleResponseDto } from '../src/sample/application/dtos/sample.dt
  * banco no primeiro boot do volume; se o seu volume ja existia:
  *
  *   docker compose exec postgres createdb -U postgres template_db_test
+ *
+ * A fila exige um **Redis de pe** (`REDIS_HOST`/`REDIS_PORT`). O
+ * `docker-compose.yml` ja sobe um e o job `test-e2e` do CI tem o servico
+ * `redis`. Duas falhas diferentes, que e facil confundir:
+ *
+ * - **Redis inalcancavel** (configurado, ninguem escutando): o app sobe, os 31
+ *   testes de CRUD passam e apenas os 5 desta fila falham — devagar, porque cada
+ *   um espera o timeout de 3s do adapter ou o prazo do `waitUntil`.
+ * - **Conexao nao configurada** (o modulo de teste importa o `SampleModule` mas
+ *   esquece o `QueueModule`): o `@nestjs/bullmq` estoura
+ *   `Worker requires a connection` ao instanciar o Worker no `onModuleInit`, o
+ *   `app.init()` do `beforeAll` cai e **os 36 testes** falham em menos de 1s,
+ *   com Redis de pe ou nao. Um arquivo de e2e que falha inteiro em 1s e sinal de
+ *   wiring faltando, nao de servico fora do ar.
+ *
+ * O Redis **nao** e limpo em massa. Nao existe para o Redis o equivalente do
+ * sufixo `_test` que protege o banco, e um `queue.obliterate()` apagaria a fila
+ * do ambiente de quem rodou o teste. Em vez disso cada assercao filtra os jobs
+ * pelo `sampleId` que o proprio teste criou (uuid novo a cada execucao, imune a
+ * sobra de rodada anterior) e o unico teste que deixa job parado na fila remove
+ * o seu no fim.
  *
  * `process.env` direto e proposital: a regra de ler tudo pelo `ConfigService`
  * vale para codigo de aplicacao, nao para o harness de teste.
@@ -113,6 +155,9 @@ interface ListBody {
   data: SampleResponseDto[];
   meta: { pagination: PaginationMeta };
 }
+interface ScheduledBody {
+  data: { scheduled: boolean };
+}
 interface ErrorBody {
   error: {
     code: string;
@@ -126,9 +171,19 @@ interface ErrorBody {
  * verdade. O `SampleModule` entra como esta em producao — controller, use cases
  * e o bind do `SAMPLE_REPOSITORY` vem dele, nao de providers redeclarados aqui:
  * assim um erro de wiring no modulo real quebra este teste.
+ *
+ * Um recorte do `AppModule` tem de levar as dependencias globais dos modulos que
+ * escolhe: o `SampleModule` declara a fila (`registerQueue`) e o `@Processor`,
+ * mas a **conexao** vem do `BullModule.forRootAsync` do `QueueModule`. Importar
+ * um sem o outro faz o `app.init()` estourar `Worker requires a connection` no
+ * `onModuleInit` do `@nestjs/bullmq` — e ai falha o arquivo inteiro, com Redis
+ * de pe ou nao. O `ConfigModule` com o namespace `redis` entra pelo mesmo
+ * motivo: e de onde o `QueueModule` le host e porta.
  */
 @Module({
   imports: [
+    ConfigModule.forRoot({ isGlobal: true, load: [redisConfig] }),
+    QueueModule,
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST ?? 'localhost',
@@ -162,6 +217,8 @@ class SampleE2eModule {}
 describe('Samples (e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
+  /** A mesma `Queue` que o `SampleQueueAdapter` recebe por `@InjectQueue`. */
+  let queue: Queue<DeactivateSampleJobData>;
   /** Quem esta chamando. Cada teste troca antes do request. */
   let currentUser: RequestUser | undefined;
 
@@ -182,6 +239,47 @@ describe('Samples (e2e)', () => {
     if (query) req = req.query(query);
     const response = await (payload === undefined ? req : req.send(payload));
     return { status: response.status, body: response.body as T };
+  };
+
+  /**
+   * Jobs da fila que carregam este `sampleId`, em **qualquer** estado — sem
+   * argumento o `getJobs()` do BullMQ varre waiting, delayed, active, completed,
+   * failed, paused e prioritized.
+   *
+   * Varrer todos os estados e o que torna `expect(...).toHaveLength(0)` uma
+   * assercao honesta: se a rota enfileirasse por engano, o worker deste processo
+   * poderia ja ter concluido o job — e a sobra ficaria em `completed`
+   * (`removeOnComplete: 100` no adapter guarda os ultimos 100), nao invisivel.
+   */
+  const jobsFor = async (sampleId: string) => {
+    const jobs = await queue.getJobs();
+    return jobs.filter((job) => job.data.sampleId === sampleId);
+  };
+
+  /**
+   * Espera ate a condicao valer, com prazo. O worker roda fora do request: um
+   * `setTimeout` fixo escolhe entre teste lento e teste instavel, e o polling
+   * evita os dois. O prazo cabe no `testTimeout: 30000` de `jest-e2e.json`.
+   */
+  const waitUntil = async (
+    condition: () => Promise<boolean>,
+    description: string,
+    timeoutMs = 10_000,
+  ): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await condition()) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`Timeout de ${timeoutMs}ms esperando: ${description}`);
+  };
+
+  const isActiveInDb = async (id: string): Promise<boolean> => {
+    const rows = await dataSource.query<{ isActive: boolean }[]>(
+      'SELECT "isActive" FROM samples WHERE id = $1',
+      [id],
+    );
+    return rows[0].isActive;
   };
 
   beforeAll(async () => {
@@ -207,6 +305,11 @@ describe('Samples (e2e)', () => {
     await app.init();
 
     dataSource = app.get(DataSource);
+    // A instancia registrada pelo `BullModule.registerQueue({ name })` do
+    // `SampleModule` — a mesma que o adapter usa, nao uma conexao nova.
+    queue = app.get<Queue<DeactivateSampleJobData>>(
+      getQueueToken(SAMPLE_QUEUE_NAME),
+    );
 
     // `samples` tem FK para `app_tenants`: os tenants precisam existir.
     const tenants: [string, string, string][] = [
@@ -592,6 +695,129 @@ describe('Samples (e2e)', () => {
       );
 
       expect(status).toBe(403);
+    });
+  });
+
+  /**
+   * A rota que apenas enfileira trabalho. Diferente das outras, ela atravessa um
+   * **Redis real** e um Worker de verdade rodando neste processo: o
+   * `SampleModule` entra completo (adapter + `@Processor`) e a conexao vem do
+   * `QueueModule`, exatamente como no `AppModule`.
+   *
+   * Duas coisas que so este arranjo prova, e que um dobro em memoria no lugar do
+   * `SAMPLE_QUEUE` nunca provaria: que a fila do `registerQueue`, o
+   * `@InjectQueue` do adapter e o `@Processor` do worker apontam para o mesmo
+   * nome, e que o job serializado chega ao worker e produz o efeito no banco.
+   */
+  describe('POST /api/v1/samples/:id/deactivations', () => {
+    it('responde 202 e enfileira o job com identificadores e a politica de retry', async () => {
+      const created = await createSample({ name: 'Agendar' });
+
+      // Delay longo de proposito: mantem o job em `delayed` enquanto as
+      // assercoes leem a fila. Com delay 0 o worker deste processo poderia
+      // consumir o job antes da leitura — e o teste falharia sem bug nenhum.
+      const { status, body } = await send<ScheduledBody>(
+        'post',
+        `/api/v1/samples/${created.id}/deactivations`,
+        { delayMs: 60_000 },
+      );
+
+      expect(status).toBe(202);
+      expect(body).toEqual({ data: { scheduled: true } });
+
+      const jobs = await jobsFor(created.id);
+      expect(jobs).toHaveLength(1);
+      const [job] = jobs;
+
+      expect(job.name).toBe(SAMPLE_DEACTIVATE_JOB);
+      // Somente identificadores no payload — nenhum campo da entidade.
+      expect(job.data).toEqual({ sampleId: created.id, tenantId: TENANT_A });
+      expect(job.opts.delay).toBe(60_000);
+      // A politica central do adapter, nao o default do BullMQ (`attempts: 0`,
+      // sem backoff): job sem retry perde trabalho no primeiro erro transitorio.
+      expect(job.opts.attempts).toBe(3);
+      expect(job.opts.backoff).toEqual({ type: 'exponential', delay: 30_000 });
+
+      // Cada teste limpa o que criou. Este arquivo nao apaga a fila em massa
+      // (ver o cabecalho), entao o job agendado para 60s adiante sairia daqui
+      // parado no Redis de quem rodou o teste.
+      await job.remove();
+    });
+
+    it('o worker consome o job e desativa o sample no banco', async () => {
+      const created = await createSample({ name: 'Desativar' });
+      expect(created.isActive).toBe(true);
+
+      // Body vazio: `delayMs` cai no `.default(0)` do schema Zod e o job fica
+      // disponivel na hora. De passagem, esta chamada mostra que o `:id` nao
+      // passa pelo schema do body — com `@UsePipes` no lugar de
+      // `@Body(new ZodValidationPipe(...))` ela responderia 400.
+      const { status } = await send<ScheduledBody>(
+        'post',
+        `/api/v1/samples/${created.id}/deactivations`,
+        {},
+      );
+      expect(status).toBe(202);
+
+      // O 202 promete o agendamento, nao o efeito. Quem cobra o efeito e o
+      // banco, depois que o worker rodar — este e o unico ponto do repositorio
+      // onde produtor, Redis e consumidor sao exercitados juntos.
+      await waitUntil(
+        async () => !(await isActiveInDb(created.id)),
+        `o worker desativar o sample ${created.id}`,
+      );
+    });
+
+    it('recusa delayMs acima de 24h com 400 e nao enfileira nada', async () => {
+      const created = await createSample({ name: 'Agendar' });
+
+      const { status, body } = await send<ErrorBody>(
+        'post',
+        `/api/v1/samples/${created.id}/deactivations`,
+        { delayMs: 24 * 60 * 60 * 1000 + 1 },
+      );
+
+      expect(status).toBe(400);
+      expect(body.error.code).toBe(ErrorCode.VALIDATION_ERROR);
+      expect(body.error.details).toEqual([
+        { field: 'delayMs', message: expect.any(String) },
+      ]);
+      // 400 sem job: o pipe barra antes do use case.
+      expect(await jobsFor(created.id)).toHaveLength(0);
+    });
+
+    it('nao enfileira job para sample de outro tenant', async () => {
+      const ofA = await createSample({ name: 'Do A' });
+
+      currentUser = adminOfB;
+      const { status, body } = await send<ErrorBody>(
+        'post',
+        `/api/v1/samples/${ofA.id}/deactivations`,
+        {},
+      );
+
+      expect(status).toBe(404);
+      expect(body.error.code).toBe(ErrorCode.SAMPLE_NOT_FOUND);
+      // O que o 404 nao diria sozinho: o use case valida ANTES de enfileirar.
+      // Enfileirar e depois recusar deixaria o worker desativando um registro de
+      // outro tenant.
+      expect(await jobsFor(ofA.id)).toHaveLength(0);
+    });
+
+    it('exige ADMIN', async () => {
+      const created = await createSample({ name: 'Alvo' });
+      currentUser = userOfA;
+
+      const { status } = await send<ErrorBody>(
+        'post',
+        `/api/v1/samples/${created.id}/deactivations`,
+        {},
+      );
+
+      // Desativar por job e a mesma escrita que o PATCH faz, so assincrona: a
+      // rota de fila nao pode ser a porta larga do modulo.
+      expect(status).toBe(403);
+      expect(await jobsFor(created.id)).toHaveLength(0);
     });
   });
 
