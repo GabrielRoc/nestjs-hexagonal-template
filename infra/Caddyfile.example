@@ -22,7 +22,16 @@
 	reverse_proxy api:3000 {
 		# X-Forwarded-For/Proto sao adicionados pelo Caddy por padrao. A app
 		# precisa de TRUST_PROXY_HOPS=1 para ler o IP real no rate limit.
-		health_uri /api/health
+
+		# A sonda e /api/health/live (liveness), NUNCA /api/health (readiness).
+		# So existe UM upstream: marcar `api:3000` como unhealthy faz o Caddy
+		# responder `502 no upstreams available` em TODAS as rotas. O /api/health
+		# agrega banco e storage e devolve 503 quando o S3 falha (HeadBucket sem
+		# `s3:ListBucket`, timeout de 3s, throttle) -- uma dependencia que a
+		# propria app trata como opcional passaria a derrubar 100% da API,
+		# inclusive rotas que nao tocam storage. O /api/health/live nao consulta
+		# dependencia nenhuma: 200 enquanto o processo aceitar conexoes.
+		health_uri /api/health/live
 		health_interval 30s
 		health_timeout 5s
 	}

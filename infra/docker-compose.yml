@@ -142,12 +142,20 @@ services:
     healthcheck:
       # A imagem de runtime e node:24-slim e NAO tem curl nem wget; o fetch
       # global do Node 24 evita instalar pacote so para o healthcheck.
+      #
+      # A sonda e /api/health/live (liveness) de proposito, NAO /api/health
+      # (readiness). Aqui "healthy" precisa significar "o processo aceita
+      # conexoes", porque este healthcheck e o gate de `up -d --wait` no deploy:
+      # com o endpoint agregado, um HeadBucket lento (ou a role sem
+      # `s3:ListBucket`) responde 503, o container nunca fica healthy e o deploy
+      # de um codigo que nem toca storage e reprovado -- com a app funcionando.
+      # A readiness continua em /api/health, para uso humano e monitoramento.
       test:
         [
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+          "fetch('http://127.0.0.1:3000/api/health/live').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 30s
       timeout: 10s
@@ -167,15 +175,18 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    # Espera a app ficar saudavel antes de comecar a aceitar trafego, para o
-    # primeiro request nao pegar 502. Contrapartida: numa stack ainda nao
-    # iniciada, se `api` nunca ficar healthy o Caddy nao sobe e o dominio fica
-    # sem TLS. Isso NAO acontece num deploy sobre a stack no ar (o compose nao
-    # recria o Caddy so porque a `api` foi recriada, e o `health_uri` do
-    # reverse_proxy no Caddyfile absorve a `api` oscilando em runtime).
+    # `service_started`, e NAO `service_healthy`: a borda tem de subir mesmo com
+    # a app degradada. Com `service_healthy` o compose so cria este container
+    # depois de `api` ficar healthy -- se ela nao fica (banco fora, migration
+    # travada, qualquer problema na app), o `up` aborta com "dependency failed to
+    # start" e o Caddy nunca e criado: nada escutando em 80/443, nenhum desafio
+    # ACME, certificado nao emitido e/ou nao renovado. Uma app com problema viraria
+    # um dominio inteiro fora do ar mais um risco de rate limit do Let's Encrypt.
+    # O custo de `service_started` e um 502 nos primeiros segundos de uma subida
+    # limpa; o `health_uri` do reverse_proxy (Caddyfile) absorve a `api` oscilando.
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
     # Unico servico com portas publicadas. TLS automatico via Let's Encrypt
     # (ACME HTTP-01 na 80, trafego na 443): a 80 precisa continuar aberta no
     # security group, senao a renovacao do certificado falha em silencio.
