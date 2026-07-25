@@ -29,7 +29,7 @@ npm run start:dev
 ```
 
 The API will be available at `http://localhost:3000`.
-Swagger docs at `http://localhost:3000/api/docs`.
+Swagger docs at `http://localhost:3000/api/docs` — only mounted when `ENABLE_SWAGGER=true` is set (it is in `.env.example`). The Swagger routes sit outside the guard pipeline, so keep the variable unset anywhere but local development.
 
 ---
 

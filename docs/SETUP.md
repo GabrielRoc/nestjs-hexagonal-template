@@ -50,6 +50,7 @@ NODE_ENV=development
 PORT=3000
 CORS_ORIGINS=http://localhost:3001,http://localhost:3002
 TRUST_PROXY_HOPS=0
+ENABLE_SWAGGER=true
 
 # Database
 DB_HOST=localhost
@@ -152,7 +153,9 @@ Application running on port 3000
 
 ## 7. Acessar a Documentacao Swagger
 
-Com o servidor rodando, acesse a documentacao interativa da API:
+A doc so e registrada quando `ENABLE_SWAGGER=true` esta no ambiente -- e opt-in explicito, em qualquer `NODE_ENV`. As rotas do Swagger sao registradas direto no adaptador HTTP, fora do pipeline de guards: nao ha autenticacao nenhuma na frente delas, entao a variavel deve ficar ausente fora do ambiente local.
+
+Com a variavel definida e o servidor rodando, acesse a documentacao interativa da API:
 
 ```
 http://localhost:3000/api/docs
