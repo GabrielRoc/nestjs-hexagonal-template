@@ -8,7 +8,6 @@ import {
   Param,
   Patch,
   Post,
-  UsePipes,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Roles } from '../../../common/decorators';
@@ -34,7 +33,6 @@ import { ErrorCode } from '../../../common/enums/error-codes.enum';
 
 @ApiTags('Tenants')
 @Controller('v1/tenants')
-@Roles(Role.SUPERADMIN)
 export class TenantController {
   constructor(
     private readonly createTenantUseCase: CreateTenantUseCase,
@@ -44,14 +42,17 @@ export class TenantController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @UsePipes(new ZodValidationPipe(createTenantSchema))
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'Create a tenant' })
-  async create(@Body() dto: CreateTenantDto) {
+  async create(
+    @Body(new ZodValidationPipe(createTenantSchema)) dto: CreateTenantDto,
+  ) {
     const tenant = await this.createTenantUseCase.execute(dto);
     return { data: tenant };
   }
 
   @Get()
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'List all tenants' })
   async list() {
     const tenants = await this.tenantRepo.findAll();
@@ -59,6 +60,7 @@ export class TenantController {
   }
 
   @Get(':id')
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'Get a tenant by ID' })
   async findOne(@Param('id') id: string) {
     const tenant = await this.tenantRepo.findById(id);
@@ -73,6 +75,7 @@ export class TenantController {
   }
 
   @Patch(':id')
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'Update a tenant' })
   async update(
     @Param('id') id: string,
@@ -96,6 +99,7 @@ export class TenantController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(Role.SUPERADMIN)
   @ApiOperation({ summary: 'Soft delete a tenant' })
   async remove(@Param('id') id: string) {
     await this.tenantRepo.softDelete(id);
