@@ -49,6 +49,14 @@ export class RealtimeIoAdapter extends IoAdapter {
     // segundo lugar capaz de afrouxar a politica de origem.
     const hardenedOptions: Partial<ServerOptions> = {
       ...options,
+      // O default do socket.io e `serveClient: true`, e com ele o
+      // `attachServe()` faz `removeAllListeners('request')` no servidor HTTP e
+      // instala o proprio handler para `/socket.io/socket.io*.js(.map)`. Essas
+      // requisicoes NAO passam pelo Express: sem headers do helmet, sem
+      // ThrottlerGuard, sem autenticacao, e com o ETag sendo a versao exata do
+      // socket.io (mais o source map). O cliente vem do bundle do front
+      // (`socket.io-client`), o backend nao precisa servir nada disso.
+      serveClient: false,
       cors: {
         origin: [...this.allowedOrigins],
         // O cliente conecta com `withCredentials: true` para o cookie de sessao

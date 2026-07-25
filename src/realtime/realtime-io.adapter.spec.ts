@@ -68,6 +68,15 @@ describe('RealtimeIoAdapter', () => {
     expect(corsPassedToSocketIo().origin).toEqual(ORIGINS);
   });
 
+  it('nao serve o bundle do cliente, nem se o decorator pedir', () => {
+    adapter.createIOServer(0, { serveClient: true });
+
+    // Com serveClient o socket.io rouba o listener 'request' e serve
+    // /socket.io/socket.io*.js fora do Express: sem helmet, sem throttler e
+    // publicando a versao exata no ETag.
+    expect(optionsPassedToSocketIo().serveClient).toBe(false);
+  });
+
   it('recusa o handshake de uma origem fora da allowlist', () => {
     adapter.createIOServer(0, {});
     const callback = jest.fn();
