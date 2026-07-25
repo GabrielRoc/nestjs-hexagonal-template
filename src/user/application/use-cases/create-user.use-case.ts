@@ -6,7 +6,6 @@ import {
 import type { CreateUserDto, UserResponseDto } from '../dtos/user.dto';
 import { UserMapper } from '../mappers/user.mapper';
 import { User } from '../../domain/entities/user.entity';
-import { Role } from '../../../common/enums/role.enum';
 import { DomainException } from '../../../common/exceptions/domain.exception';
 import { ErrorCode } from '../../../common/enums/error-codes.enum';
 
@@ -39,7 +38,7 @@ export class CreateUserUseCase {
       name: dto.name,
       email: dto.email,
       phone: dto.phone ?? null,
-      role: dto.role as Role,
+      role: dto.role,
     });
 
     const saved = await this.userRepo.save(user);

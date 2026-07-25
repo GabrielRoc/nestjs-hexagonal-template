@@ -4,8 +4,10 @@ import { SuperTokensModule } from 'supertokens-nestjs';
 import Session from 'supertokens-node/recipe/session';
 import EmailPassword from 'supertokens-node/recipe/emailpassword';
 import Dashboard from 'supertokens-node/recipe/dashboard';
+import { AuthController } from './infrastructure/http/auth.controller';
 
 @Module({
+  controllers: [AuthController],
   imports: [
     SuperTokensModule.forRootAsync({
       imports: [ConfigModule],
