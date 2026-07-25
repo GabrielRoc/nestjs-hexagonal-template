@@ -5,6 +5,15 @@ import { SampleTypeormEntity } from './sample.typeorm-entity';
 import { Sample } from '../../domain/entities/sample.entity';
 import type { SampleRepositoryPort } from '../../domain/ports/sample.repository.port';
 
+/**
+ * Unico ponto do modulo que conhece TypeORM. Duas coisas para copiar daqui:
+ *
+ * - `tenantId` entra no `where` de **todas** as operacoes, inclusive nas que ja
+ *   recebem o `id`: sem ele, um id valido de outro tenant e um vazamento.
+ * - `deletedAt IS NULL` nao aparece escrito. O `@DeleteDateColumn` faz o TypeORM
+ *   adicionar o filtro sozinho em `find*`; quem sai desse caminho (o
+ *   `createQueryBuilder` de `getMaxSortOrder`) precisa filtrar na mao.
+ */
 @Injectable()
 export class SampleTypeormRepository implements SampleRepositoryPort {
   constructor(
@@ -18,6 +27,7 @@ export class SampleTypeormRepository implements SampleRepositoryPort {
       name: sample.name,
       description: sample.description,
       isActive: sample.isActive,
+      sortOrder: sample.sortOrder,
     });
     const saved = await this.repo.save(entity);
     return this.toDomain(saved);
@@ -35,11 +45,26 @@ export class SampleTypeormRepository implements SampleRepositoryPort {
   ): Promise<[Sample[], number]> {
     const [entities, total] = await this.repo.findAndCount({
       where: { tenantId },
-      order: { createdAt: 'DESC' },
+      // `id` como ultimo criterio de desempate: sem ele, registros com o mesmo
+      // sortOrder e o mesmo createdAt podem trocar de pagina entre requisicoes.
+      order: { sortOrder: 'ASC', createdAt: 'DESC', id: 'ASC' },
       skip: (page - 1) * perPage,
       take: perPage,
     });
     return [entities.map((e) => this.toDomain(e)), total];
+  }
+
+  async getMaxSortOrder(tenantId: string): Promise<number> {
+    // Agregado calculado no banco: carregar a lista para achar o maior valor
+    // custaria uma leitura proporcional ao tamanho do tenant.
+    const result = await this.repo
+      .createQueryBuilder('sample')
+      .select('MAX(sample.sortOrder)', 'max')
+      .where('sample.tenantId = :tenantId', { tenantId })
+      // O queryBuilder nao herda o filtro de soft delete do @DeleteDateColumn.
+      .andWhere('sample.deletedAt IS NULL')
+      .getRawOne<{ max: number | null }>();
+    return result?.max ?? -1;
   }
 
   async update(sample: Sample): Promise<Sample> {
@@ -49,6 +74,7 @@ export class SampleTypeormRepository implements SampleRepositoryPort {
         name: sample.name,
         description: sample.description,
         isActive: sample.isActive,
+        sortOrder: sample.sortOrder,
       },
     );
     const updated = await this.repo.findOneOrFail({
@@ -68,6 +94,7 @@ export class SampleTypeormRepository implements SampleRepositoryPort {
       name: entity.name,
       description: entity.description,
       isActive: entity.isActive,
+      sortOrder: entity.sortOrder,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
       deletedAt: entity.deletedAt,

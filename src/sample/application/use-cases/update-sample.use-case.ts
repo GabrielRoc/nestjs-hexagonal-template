@@ -8,6 +8,12 @@ import { SampleMapper } from '../mappers/sample.mapper';
 import { DomainException } from '../../../common/exceptions/domain.exception';
 import { ErrorCode } from '../../../common/enums/error-codes.enum';
 
+/**
+ * Update parcial: cada campo e copiado so quando vem no DTO. O teste da
+ * diferenca entre `undefined` (campo ausente, mantem) e `null` (cliente pediu
+ * para limpar) — `if (dto.description)` apagaria a diferenca e ignoraria `null`
+ * e string vazia.
+ */
 @Injectable()
 export class UpdateSampleUseCase {
   constructor(
@@ -20,6 +26,8 @@ export class UpdateSampleUseCase {
     tenantId: string,
     dto: UpdateSampleDto,
   ): Promise<SampleResponseDto> {
+    // `findById` recebe o tenant: um id de outro tenant tem de dar 404, nunca
+    // 403 nem o registro do vizinho.
     const sample = await this.sampleRepo.findById(id, tenantId);
     if (!sample) {
       throw new DomainException(
@@ -32,6 +40,7 @@ export class UpdateSampleUseCase {
     if (dto.name !== undefined) sample.name = dto.name;
     if (dto.description !== undefined) sample.description = dto.description;
     if (dto.isActive !== undefined) sample.isActive = dto.isActive;
+    if (dto.sortOrder !== undefined) sample.sortOrder = dto.sortOrder;
 
     const updated = await this.sampleRepo.update(sample);
     return SampleMapper.toResponse(updated);
