@@ -1,0 +1,45 @@
+# Exemplo de Caddyfile de producao.
+#
+# O workflow de deploy copia este arquivo para infra/Caddyfile no servidor, que
+# e o caminho montado pelo servico `caddy` do infra/docker-compose.yml. O
+# dominio e o e-mail do ACME vem do ambiente ({$VAR:default}), entao nao ha nada
+# especifico de ambiente commitado aqui: basta definir CADDY_DOMAIN e
+# CADDY_ACME_EMAIL no .env do servidor.
+#
+# Teste local:
+#   docker run --rm -v "$PWD/infra:/w" -w /w caddy:2-alpine \
+#     caddy validate --config Caddyfile.example --adapter caddyfile
+{
+	# E-mail da conta ACME: recebe os avisos de expiracao do Let's Encrypt.
+	email {$CADDY_ACME_EMAIL:admin@exemplo.com.br}
+}
+
+{$CADDY_DOMAIN:api.exemplo.com.br} {
+	# O certificado e emitido e renovado automaticamente (Let's Encrypt).
+	# Requisitos: DNS do dominio apontando para a instancia e portas 80 e 443
+	# abertas no security group -- a 80 e usada no desafio HTTP-01.
+
+	reverse_proxy api:3000 {
+		# X-Forwarded-For/Proto sao adicionados pelo Caddy por padrao. A app
+		# precisa de TRUST_PROXY_HOPS=1 para ler o IP real no rate limit.
+		health_uri /api/health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	header {
+		# Remove o header Server (nao entrega versao/stack para scanner).
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	# Log de acesso em JSON no stdout: e o driver json-file do compose que faz a
+	# rotacao (max-size/max-file), entao nada escreve em arquivo dentro do
+	# container.
+	log {
+		output stdout
+		format json
+	}
+}
