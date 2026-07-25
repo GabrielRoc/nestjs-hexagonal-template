@@ -89,6 +89,7 @@ src/
 ├── user/               # User module
 ├── sample/             # Sample module (reference implementation)
 ├── storage/            # S3/LocalStack file storage
+├── realtime/           # Tenant-scoped Socket.io gateway + CORS-aware IoAdapter
 ├── app.module.ts
 ├── instrument.ts       # OpenTelemetry instrumentation
 └── main.ts
@@ -125,6 +126,7 @@ src/
 - **API Docs:** Swagger (via @nestjs/swagger)
 - **Observability:** OpenTelemetry + Winston
 - **Storage:** AWS S3 (LocalStack for local dev)
+- **Realtime:** Socket.io (`@nestjs/websockets` + `@nestjs/platform-socket.io`)
 - **Security:** Helmet, Throttler
 - **Testing:** Jest + Supertest
 

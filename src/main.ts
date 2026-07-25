@@ -8,6 +8,7 @@ import SuperTokens from 'supertokens-node';
 import { FORM_TOKEN_HEADER } from './anti-bot/anti-bot.constants';
 import { AppModule } from './app.module';
 import { AppLoggerService } from './logger/logger.service';
+import { RealtimeIoAdapter } from './realtime/realtime-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -46,6 +47,13 @@ async function bootstrap() {
       ...SuperTokens.getAllCORSHeaders(),
     ],
   });
+
+  // A mesma allowlist vale para o handshake do WebSocket. Nao da para colocar
+  // isso no @WebSocketGateway: o decorator e avaliado no carregamento da classe,
+  // sem container e sem ConfigService. `useWebSocketAdapter` e o ponto de
+  // extensao do Nest para configurar o servidor de WS com dependencias ja
+  // resolvidas. Sem esta linha o gateway sobe SEM validacao de Origin.
+  app.useWebSocketAdapter(new RealtimeIoAdapter(app, corsOrigins));
 
   // Global prefix
   app.setGlobalPrefix('api');

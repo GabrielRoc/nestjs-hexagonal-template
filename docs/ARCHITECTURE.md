@@ -406,6 +406,7 @@ src/
   auth/                    # SuperTokens integration
   storage/                 # S3/LocalStack storage adapter
   anti-bot/                # Camadas anti-bot opt-in (@AntiBot), ports + guards
+  realtime/                # Gateway Socket.io por tenant + IoAdapter com CORS
 
   audit-log/               # Modulo de log de auditoria
     domain/

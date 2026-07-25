@@ -26,6 +26,7 @@ import { UserModule } from './user/infrastructure/user.module';
 import { SampleModule } from './sample/infrastructure/sample.module';
 import { StorageModule } from './storage/storage.module';
 import { HealthModule } from './health/health.module';
+import { RealtimeModule } from './realtime/realtime.module';
 
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -68,6 +69,7 @@ import { FeatureGuard } from './tenant-feature/infrastructure/http/feature.guard
     SampleModule,
     StorageModule,
     HealthModule,
+    RealtimeModule,
   ],
   controllers: [],
   providers: [

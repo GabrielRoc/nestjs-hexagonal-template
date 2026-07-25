@@ -11,6 +11,7 @@
 - **Observabilidade:** OpenTelemetry + Winston
 - **Storage:** AWS S3 (LocalStack local)
 - **Filas:** BullMQ (@nestjs/bullmq) sobre Redis 7
+- **Realtime:** Socket.io (`@nestjs/websockets` + `@nestjs/platform-socket.io`)
 - **Seguranca:** Helmet, @nestjs/throttler
 - **Testes:** Jest + Supertest
 
@@ -48,8 +49,41 @@ modulo/
 | `storage`        | `src/storage/`        | Upload de arquivos (S3)                                                                                                       |
 | `anti-bot`       | `src/anti-bot/`       | Protecao anti-bot em camadas (opt-in)                                                                                         |
 | `queue`          | `src/queue/`          | Conexao BullMQ/Redis compartilhada                                                                                            |
+| `realtime`       | `src/realtime/`       | Eventos em tempo real (Socket.io)                                                                                             |
 | `sample`         | `src/sample/`         | Modulo de referencia (pode ser removido)                                                                                      |
 | `common`         | `src/common/`         | Guards, filters, pipes, decorators, utils                                                                                     |
+
+### Realtime (`src/realtime/`)
+
+Namespace Socket.io em `/realtime`, autenticado pela sessao do SuperTokens e
+isolado por tenant. Nao segue as tres camadas hexagonais: e infraestrutura, como
+`storage` e `logger`.
+
+- **Emitir de qualquer modulo:** injete `RealtimeService` (o modulo e `@Global()`)
+  e chame `emit(tenantId, event, payload)`. A API e generica de proposito — nao
+  adicione metodos por evento de negocio, isso acopla a infra a cada dominio.
+- **Isolamento:** cada socket entra na sala `tenant:<tenantId>` no handshake e o
+  `emit` so publica nessa sala, nunca no namespace inteiro.
+- **Handshake:** o cookie de sessao e verificado com `Session.getSession` e o
+  `tenantId` vem do `USER_REPOSITORY`. Sem sessao valida ou sem usuario ativo, o
+  socket recebe o evento `unauthorized` e e desconectado. Falha de
+  infraestrutura (SuperTokens/JWKS/banco fora) NAO vira `unauthorized`: e logada
+  em `error` e o socket cai sem esse evento, para o front reconectar com backoff
+  em vez de derrubar a sessao do usuario.
+- **A autenticacao vale SO no handshake.** Nao ha revalidacao depois que o
+  socket entra na sala: revogar a sessao (logout) ou desativar/remover o usuario
+  **nao** derruba um socket ja aberto, que segue recebendo os eventos do tenant
+  enquanto a conexao viver (o caminho HTTP, esse sim, bloqueia na requisicao
+  seguinte). Revalidar com `getSession` nao resolveria: `client.handshake` e um
+  snapshot congelado no upgrade, entao derrubaria todo socket saudavel quando
+  aquele access token expirasse. As saidas reais estao documentadas no doc
+  comment de `RealtimeGateway`.
+- **CORS/Origin:** aplicado pelo `RealtimeIoAdapter`, registrado em `main.ts` com
+  as origens de `CORS_ORIGINS`. O decorator `@WebSocketGateway` e avaliado no
+  carregamento da classe e nao consegue ler o `ConfigService`, por isso a
+  politica vive no adapter. **Se escrever outro bootstrap, registre o adapter** —
+  sem ele o handshake nao valida `Origin` (o gateway loga um erro no boot).
+- **Cliente:** `io('<host>/realtime', { withCredentials: true })`.
 
 ---
 
